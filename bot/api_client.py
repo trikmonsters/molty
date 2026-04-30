@@ -224,3 +224,27 @@ class MoltyAPI:
     async def close(self):
         if self._client and not self._client.is_closed:
             await self._client.aclose()
+
+    # ── Fee Delegation Relay ──────────────────────────────────────────
+
+    async def post_relay_identity(self, sender_raw_tx: str, owner_eoa: str) -> dict:
+        """
+        POST /relay/identity — submit signed tx for fee-delegated ERC-8004 registration.
+
+        The server (Molty Royale) acts as FeePayer:
+          1. Receives sender-signed EIP-1559 tx
+          2. Adds FeePayer signature (type 0x07 FeeDelegatedDynamicFeeTx)
+          3. Submits to CROSS node and returns txHash
+
+        Args:
+            sender_raw_tx: Hex-encoded signed raw tx from Owner EOA (0x-prefixed)
+            owner_eoa: Owner EOA address (for server-side verification)
+
+        Returns dict with 'txHash' on success.
+        Raises APIError on failure.
+        """
+        log.info("Submitting signed tx to relay: ownerEoa=%s", owner_eoa[:12] + "...")
+        return await self._request("POST", "/relay/identity", json={
+            "senderRawTx": sender_raw_tx,
+            "ownerEoa": owner_eoa,
+        })
