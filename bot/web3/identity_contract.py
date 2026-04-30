@@ -35,12 +35,15 @@ async def register_identity_onchain(owner_private_key: str) -> int | None:
             abi=IDENTITY_ABI,
         )
 
-        # Gas is delegated (relayed by Tx delegator), but we still set gasLimit
-        # manually to prevent ethers from failing early on revert estimation.
+        # Gas is delegated (relayed by Tx delegator).
+        # WAJIB set gasPrice=0 secara eksplisit agar Web3.py tidak query
+        # eth_gasPrice dari node (node CROSS mengembalikan 3.5 gwei, bukan 0).
+        # Tanpa gasPrice=0, transaksi akan gagal dengan insufficient funds.
         tx = registry.functions.register().build_transaction({
             "from": acct.address,
             "nonce": w3.eth.get_transaction_count(acct.address),
-            "gas": 200000,
+            "gas": 700_000,
+            "gasPrice": 0,
             "chainId": CROSS_CHAIN_ID,
         })
 
@@ -65,4 +68,3 @@ async def register_identity_onchain(owner_private_key: str) -> int | None:
     except Exception as e:
         log.error("ERC-8004 register() error (gas is delegated — this is a client-side issue): %s", e)
         return None
-
