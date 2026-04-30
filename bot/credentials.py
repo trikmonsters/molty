@@ -134,3 +134,12 @@ def update_env_file(key: str, value: str):
     if not found:
         lines.append(f"{key}={value}")
     env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def get_owner_eoa() -> str:
+    """Resolve owner EOA address from env → wallet file."""
+    from bot.config import OWNER_EOA
+    if OWNER_EOA:
+        return OWNER_EOA
+    wallet = load_owner_wallet()
+    return wallet.get("address", "") if wallet else ""
