@@ -1,30 +1,27 @@
+from TTS.api import TTS
+import torch
 import os
-import subprocess
 
 TEXT = """
 Halo semuanya.
-Ini adalah contoh suara AI Indonesia yang sangat natural
-menggunakan F5 TTS dan voice cloning.
+Ini adalah suara AI Indonesia menggunakan XTTS v2.
+Hasilnya jauh lebih natural dan stabil.
 """
 
-REFERENCE_TEXT = """
-Halo semuanya saya sedang mencoba teknologi suara AI terbaru.
-"""
+if not os.path.exists("jokowi.mp3"):
+    raise FileNotFoundError("speaker.wav tidak ditemukan")
 
-# simpan text
-with open("gen.txt", "w", encoding="utf-8") as f:
-    f.write(TEXT)
+device = "cpu"
 
-# generate
-cmd = [
-    "f5-tts_infer-cli",
-    "--model", "F5TTS_v1_Base",
-    "--ref_audio", "jokowi.mp3",
-    "--ref_text", REFERENCE_TEXT,
-    "--gen_text", TEXT,
-    "--output_dir", "output"
-]
+tts = TTS(
+    model_name="tts_models/multilingual/multi-dataset/xtts_v2"
+).to(device)
 
-subprocess.run(cmd, check=True)
+tts.tts_to_file(
+    text=TEXT,
+    speaker_wav="jokowi.mp3",
+    language="id",
+    file_path="output.wav"
+)
 
-print("Selesai generate suara")
+print("Selesai")
