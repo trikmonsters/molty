@@ -22,11 +22,11 @@ jobs:
           sudo apt update
           sudo apt install -y ffmpeg
 
-      - name: Install torch CPU
+      - name: Install compatible torch
         run: |
-          pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+          pip install torch==2.3.1 torchaudio==2.3.1
 
-      - name: Install XTTS dependencies
+      - name: Install XTTS stable deps
         run: |
           pip install TTS==0.22.0
           pip install transformers==4.38.2
