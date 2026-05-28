@@ -1,102 +1,17 @@
-# .github/workflows/tts-piper-fixed.yml
-name: Generate TTS dengan Piper (Indonesia) - FIXED
-on:
-  workflow_dispatch:
-    inputs:
-      text:
-        description: 'Teks yang ingin diubah ke suara'
-        required: true
-        default: 'Halo! Ini contoh text-to-speech gratis di GitHub Actions dengan Piper.'
-      quality:
-        description: 'Kualitas voice: low / medium'
-        required: false
-        default: 'low'
-        type: choice
-        options:
-          - low
-          - medium
-
-jobs:
-  piper-tts:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+- name: Generate Speech (Auto-download)
+  run: |
+    python -c "
+    from piper import PiperVoice
+    import asyncio
     
-    steps:
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      - name: Install Piper
-        run: pip install piper-tts
-
-      - name: Cache Model
-        uses: actions/cache@v4
-        with:
-          path: ~/.local/share/piper
-          key: piper-id-upik-${{ github.event.inputs.quality }}-v1
-          restore-keys: piper-id-upik-
-
-      - name: Download Model Indonesia
-        run: |
-          QUALITY="${{ github.event.inputs.quality }}"
-          MODEL_DIR="$HOME/.local/share/piper"
-          mkdir -p "$MODEL_DIR"
-          
-          # URL langsung yang sudah teruji (tanpa manipulasi path rumit)
-          if [ "$QUALITY" = "medium" ]; then
-            BASE_URL="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/id_ID/upik/medium"
-            MODEL_NAME="id_ID-upik-medium"
-          else
-            BASE_URL="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/id_ID/upik/low"
-            MODEL_NAME="id_ID-upik-low"
-          fi
-          
-          ONNX_FILE="$MODEL_DIR/${MODEL_NAME}.onnx"
-          JSON_FILE="$MODEL_DIR/${MODEL_NAME}.onnx.json"
-          
-          if [ ! -f "$ONNX_FILE" ]; then
-            echo "⏳ Downloading model: $MODEL_NAME"
-            wget -q --show-progress "$BASE_URL/${MODEL_NAME}.onnx" -O "$ONNX_FILE"
-            wget -q --show-progress "$BASE_URL/${MODEL_NAME}.onnx.json" -O "$JSON_FILE"
-            echo "✅ Model downloaded successfully"
-          else
-            echo "✅ Model already cached: $MODEL_NAME"
-          fi
-
-      - name: Generate Speech
-        run: |
-          TEXT="${{ github.event.inputs.text }}"
-          QUALITY="${{ github.event.inputs.quality }}"
-          
-          if [ "$QUALITY" = "medium" ]; then
-            MODEL_NAME="id_ID-upik-medium"
-          else
-            MODEL_NAME="id_ID-upik-low"
-          fi
-          
-          MODEL_PATH="$HOME/.local/share/piper/${MODEL_NAME}.onnx"
-          
-          echo "🎙️ Generating: $TEXT"
-          echo "$TEXT" | piper \
-            --model "$MODEL_PATH" \
-            --output_file output.wav \
-            --speaker 0 \
-            --length_scale 1.0
-          
-          echo "✅ Audio generated: output.wav"
-
-      - name: Convert to MP3 (Opsional)
-        run: |
-          if [ -f output.wav ]; then
-            sudo apt-get update && sudo apt-get install -y ffmpeg > /dev/null 2>&1
-            ffmpeg -y -i output.wav -codec:a libmp3lame -qscale:a 2 output.mp3 2>/dev/null
-            echo "✅ Converted to MP3"
-          fi
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: tts-output-${{ github.run_number }}
-          path: output.*
-          retention-days: 7
+    async def main():
+        voice = await PiperVoice.load(
+            model='id_ID-upik-low',
+            data_dir=None,  # Auto-download ke ~/.local/share/piper
+            use_cuda=False
+        )
+        with open('output.wav', 'wb') as f:
+            await voice.synthesize('Halo! Ini contoh TTS dengan Piper.', f)
+    
+    asyncio.run(main())
+    "
