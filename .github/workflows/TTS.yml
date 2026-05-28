@@ -7,6 +7,9 @@ jobs:
   tts:
     runs-on: ubuntu-latest
 
+    env:
+      COQUI_TOS_AGREED: "1"
+
     steps:
       - uses: actions/checkout@v4
 
