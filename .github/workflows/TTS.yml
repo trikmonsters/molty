@@ -20,7 +20,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-          cache: pip
+          # cache: pip dihapus karena tidak ada requirements.txt/pyproject.toml
 
       - name: 📦 Install Dependencies
         run: |
@@ -55,13 +55,11 @@ jobs:
           with torch.no_grad():
               audio = model(**inputs).waveform
 
-          # Nama file unik berdasarkan hash teks
           file_hash = hashlib.md5(text.encode()).hexdigest()[:6]
           filename = f"audio_{file_hash}.wav"
           scipy.io.wavfile.write(filename, model.config.sampling_rate, audio.numpy().squeeze())
           print(f"✅ Audio tersimpan: {filename}")
 
-          # Simpan nama file ke environment untuk step berikutnya
           with open(os.environ["GITHUB_ENV"], "a") as f:
               f.write(f"OUTPUT_FILE={filename}\n")
           PY
