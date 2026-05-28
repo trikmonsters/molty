@@ -7,18 +7,6 @@ on:
         description: "Teks untuk TTS (kosongkan untuk pakai default)"
         required: false
         default: "Jangan pernah coba-coba naik kereta ini kalau kamu punya riwayat penyakit jantung. Bukan di taman bermain, tapi ini adalah jalur transportasi nyata di pegunungan Swiss yang punya kemiringan hampir tegak lurus. Sekali lepas kendali, taruhannya nyawa. Nama tempatnya Gelmerbahn. Coba cek share ketiga kamu, berani gak dia kamu ajak ke sini?"
-      voice:
-        description: "Pilih voice (default: id-ID-GadisNeural)"
-        required: false
-        default: "id-ID-GadisNeural"
-        type: choice
-        options:
-          - id-ID-GadisNeural
-          - id-ID-ArdiNeural
-          - jv-ID-DimasNeural
-          - jv-ID-SitiNeural
-          - su-ID-JajangNeural
-          - su-ID-TutiNeural
 
 jobs:
   generate-audio:
@@ -41,40 +29,41 @@ jobs:
       - name: 🔊 Generate TTS Audio
         env:
           TTS_TEXT: ${{ inputs.text }}
-          TTS_VOICE: ${{ inputs.voice }}
         run: |
           if [ -z "$TTS_TEXT" ]; then
             echo "❌ Error: Teks kosong."
             exit 1
           fi
 
-          # Default voice jika kosong
-          VOICE="${TTS_VOICE:-id-ID-GadisNeural}"
+          VOICE="id-ID-ArdiNeural"
           FILE_HASH=$(echo -n "$TTS_TEXT" | md5sum | cut -c1-6)
           MP3_FILE="audio_${FILE_HASH}.mp3"
           WAV_FILE="audio_${FILE_HASH}.wav"
 
+          # Simpan teks ke file agar aman dari karakter khusus
           echo "$TTS_TEXT" > /tmp/tts_input.txt
-          echo "🎙️ Generating with voice: $VOICE"
-          
+
+          echo "🎙️ Mengonversi teks ke audio (Voice: $VOICE)..."
           edge-tts --file /tmp/tts_input.txt --voice "$VOICE" --write-media "$MP3_FILE"
+
+          echo "🔄 Konversi native MP3 ke format .wav..."
           ffmpeg -y -i "$MP3_FILE" -acodec pcm_s16le -ar 44100 "$WAV_FILE"
 
-          echo "✅ Audio: $WAV_FILE"
+          echo "✅ Audio berhasil: $WAV_FILE"
           echo "OUTPUT_FILE=$WAV_FILE" >> $GITHUB_ENV
 
       - name: 🚀 Upload to Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: tts-edge-${{ github.run_number }}
-          name: "🎧 Edge-TTS #${{ github.run_number }}"
+          name: "🎧 Edge-TTS Audio #${{ github.run_number }}"
           body: |
-            ### 📝 Teks
+            ### 📝 Teks yang Digunakan
             ```text
             ${{ inputs.text }}
             ```
-            > 🎙️ Voice: `${{ inputs.voice }}`  
-            > 💡 Klik file `.wav` untuk download langsung (tanpa ZIP).
+            > 💡 Klik file `.wav` di atas untuk download langsung (tidak perlu ekstrak ZIP).
+            > 🎙️ Voice: `id-ID-GadisNeural` (Microsoft Neural)
           files: ${{ env.OUTPUT_FILE }}
           draft: false
           prerelease: false
