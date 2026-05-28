@@ -14,8 +14,10 @@ if not os.path.exists("jokowi.mp3"):
 device = "cpu"
 
 tts = TTS(
-    model_name="tts_models/multilingual/multi-dataset/xtts_v2"
-).to(device)
+    model_name="tts_models/multilingual/multi-dataset/xtts_v2",
+    progress_bar=False,
+    gpu=False
+)
 
 tts.tts_to_file(
     text=TEXT,
