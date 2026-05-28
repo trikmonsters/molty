@@ -19,7 +19,7 @@ with open("gen.txt", "w", encoding="utf-8") as f:
 cmd = [
     "f5-tts_infer-cli",
     "--model", "F5TTS_v1_Base",
-    "--ref_audio", "speaker.wav",
+    "--ref_audio", "jokowi.mp3",
     "--ref_text", REFERENCE_TEXT,
     "--gen_text", TEXT,
     "--output_dir", "output"
