@@ -1,20 +1,39 @@
-from melo.api import TTS
+name: MeloTTS Indonesia
 
-text = """
-Halo semuanya...
+on:
+  workflow_dispatch:
 
-Hari ini kita akan membahas teknologi AI terbaru.
+jobs:
+  tts:
+    runs-on: ubuntu-latest
 
-Dan hasilnya keren banget.
-"""
+    steps:
+      - uses: actions/checkout@v4
 
-model = TTS(language='ID')
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-model.tts_to_file(
-    text=text,
-    speaker_id=0,
-    output_path='output.wav',
-    speed=1.0
-)
+      - name: Install ffmpeg
+        run: |
+          sudo apt update
+          sudo apt install -y ffmpeg
 
-print("Selesai generate")
+      - name: Install torch
+        run: |
+          pip install torch==2.3.1 torchaudio==2.3.1
+
+      - name: Install MeloTTS
+        run: |
+          pip install git+https://github.com/myshell-ai/MeloTTS.git
+          pip install unidic
+          python -m unidic download
+
+      - name: Run TTS
+        run: |
+          python main.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hasil-audio
+          path: output.wav
