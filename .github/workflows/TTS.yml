@@ -1,17 +1,29 @@
-- name: Generate Speech (Auto-download)
-  run: |
-    python -c "
-    from piper import PiperVoice
-    import asyncio
-    
-    async def main():
-        voice = await PiperVoice.load(
-            model='id_ID-upik-low',
-            data_dir=None,  # Auto-download ke ~/.local/share/piper
-            use_cuda=False
-        )
-        with open('output.wav', 'wb') as f:
-            await voice.synthesize('Halo! Ini contoh TTS dengan Piper.', f)
-    
-    asyncio.run(main())
-    "
+name: Kokoro TTS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  tts:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          pip install kokoro onnxruntime soundfile
+
+      - name: Run TTS
+        run: python main.py
+
+      - name: Upload Audio
+        uses: actions/upload-artifact@v4
+        with:
+          name: tts-audio
+          path: "*.wav"
