@@ -1,4 +1,4 @@
-name: F5 TTS Indonesia
+name: XTTS Indonesia
 
 on:
   workflow_dispatch:
@@ -8,33 +8,30 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install FFmpeg
+      - name: Install ffmpeg
         run: |
           sudo apt update
           sudo apt install ffmpeg -y
 
       - name: Install Torch CPU
         run: |
-          pip install torch torchaudio
+          pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 
-      - name: Install F5-TTS
+      - name: Install XTTS
         run: |
-          pip install f5-tts
+          pip install TTS
 
-      - name: Run TTS
+      - name: Run XTTS
         run: |
           python main.py
 
-      - name: Upload Audio
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: hasil-suara
-          path: output/*
+          name: hasil-audio
+          path: output.wav
