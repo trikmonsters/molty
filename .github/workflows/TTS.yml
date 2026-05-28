@@ -1,0 +1,23 @@
+name: Generate TTS with Edge-TTS
+on: [workflow_dispatch]
+
+jobs:
+  tts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install edge-tts
+        run: pip install edge-tts
+
+      - name: Generate Speech
+        run: |
+          edge-tts \
+            --text "Halo! Ini adalah contoh text to speech gratis di GitHub Actions." \
+            --voice id-ID-GadisNeural \
+            --write-media output.mp3 \
+            --write-subtitles output.srt
+
+      - name: Upload Output
+        uses: actions/upload-artifact@v4
+        with:
+          name: tts-audio
+          path: output.mp3
