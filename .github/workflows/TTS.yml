@@ -1,22 +1,22 @@
-name: TTS Lokal → GitHub Release
+name: MMS-TTS Indonesian → GitHub Release
 on:
   workflow_dispatch:
     inputs:
       custom_text:
-        description: 'Teks untuk TTS (kosong = pakai default)'
+        description: 'Teks untuk TTS (kosong = pakai default Gelmerbahn)'
         required: false
         default: ''
   push:
     branches: [main]
     paths:
-      - 'tts-input.txt'  # Trigger jika file teks diubah
+      - 'tts-input.txt'
 
 jobs:
   generate-tts:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
-      contents: write  # Diperlukan untuk upload ke Release
+      contents: write
     
     steps:
       - name: Checkout Repo
@@ -26,28 +26,24 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+          cache: 'pip'
 
-      - name: Install Piper TTS
-        run: pip install piper-tts
+      - name: Install PyTorch CPU-only (dari PyTorch index)
+        run: |
+          pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu --no-cache-dir
 
-      - name: Cache Indonesian Model
+      - name: Install Transformers & Dependencies (dari PyPI default)
+        run: |
+          pip install transformers accelerate scipy soundfile --no-cache-dir
+
+      - name: Cache HuggingFace Models
         uses: actions/cache@v4
         with:
-          path: ~/.local/share/piper
-          key: piper-id-upik-low-v1
-          restore-keys: piper-id-
-
-      - name: Download Model (jika belum ada di cache)
-        run: |
-          mkdir -p ~/.local/share/piper
-          if [ ! -f ~/.local/share/piper/id_ID-upik-low.onnx ]; then
-            echo "⏳ Downloading Piper Indonesian model..."
-            wget -q https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/id_ID/upik/low/id_ID-upik-low.onnx \
-              -O ~/.local/share/piper/id_ID-upik-low.onnx
-            wget -q https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/id_ID/upik/low/id_ID-upik-low.onnx.json \
-              -O ~/.local/share/piper/id_ID-upik-low.onnx.json
-            echo "✅ Model downloaded"
-          fi
+          path: ~/.cache/huggingface
+          key: mms-tts-ind-v1-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            mms-tts-ind-v1-
+            mms-tts-ind-
 
       - name: Prepare Text Input
         id: text-input
@@ -64,41 +60,69 @@ jobs:
 Jangan pernah coba-coba naik kereta ini kalau kamu punya riwayat penyakit jantung. Bukan di taman bermain, tapi ini adalah jalur transportasi nyata di pegunungan Swiss yang punya kemiringan hampir tegak lurus. Sekali lepas kendali, taruhannya nyawa. Nama tempatnya Gelmerbahn. Coba cek share ketiga kamu, berani gak dia kamu ajak ke sini?
 DEFAULT_TEXT
           fi
-          # Generate filename based on text hash (untuk menghindari overwrite)
-          HASH=$(echo -n "$(cat input.txt)" | md5sum | cut -c1-8)
-          echo "filename=gelmerbahn-${HASH}.wav" >> $GITHUB_OUTPUT
-          echo "📄 Text preview: $(head -c 100 input.txt)..."
-
-      - name: Generate Speech with Piper
-        run: |
-          cat input.txt | piper \
-            --model ~/.local/share/piper/id_ID-upik-low.onnx \
-            --output_file ${{ steps.text-input.outputs.filename }} \
-            --speaker 0 \
-            --length_scale 0.95  # Sedikit lebih lambat agar lebih natural
           
-          echo "✅ Audio generated: ${{ steps.text-input.outputs.filename }}"
-          ls -lh ${{ steps.text-input.outputs.filename }}
+          # Generate unique filename based on text hash
+          HASH=$(echo -n "$(cat input.txt)" | md5sum | cut -c1-8)
+          echo "filename=gelmerbahn-mms-${HASH}.wav" >> $GITHUB_OUTPUT
+          echo "📄 Text length: $(wc -c < input.txt) characters"
+
+      - name: Generate Speech with MMS-TTS Indonesian
+        run: |
+          python - << 'PYTHON_SCRIPT'
+          from transformers import VitsModel, AutoTokenizer
+          import torch, scipy, os, sys
+          
+          print("⏳ Loading MMS-TTS Indonesian model (facebook/mms-tts-ind)...")
+          model_id = "facebook/mms-tts-ind"
+          
+          # Load model dengan device CPU
+          model = VitsModel.from_pretrained(model_id)
+          tokenizer = AutoTokenizer.from_pretrained(model_id)
+          
+          # Baca teks dari file
+          with open("input.txt", "r", encoding="utf-8") as f:
+              text = f.read().strip()
+          
+          print(f"🔤 Text: {text[:100]}...")
+          print("🔊 Generating audio...")
+          
+          # Tokenize & generate
+          inputs = tokenizer(text, return_tensors="pt")
+          with torch.no_grad():
+              output = model(**inputs).waveform
+          
+          # Save to WAV
+          output_file = os.environ.get("OUTPUT_FILE", "output.wav")
+          sampling_rate = model.config.sampling_rate
+          scipy.io.wavfile.write(output_file, rate=sampling_rate, data=output.numpy().squeeze())
+          
+          size_kb = os.path.getsize(output_file) / 1024
+          print(f"✅ Success: {output_file} ({size_kb:.1f} KB, {sampling_rate}Hz)")
+          PYTHON_SCRIPT
+        env:
+          OUTPUT_FILE: ${{ steps.text-input.outputs.filename }}
 
       - name: Create/Update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: tts-release-${{ github.run_number }}
-          name: "🔊 TTS Output #${{ github.run_number }}"
+          tag_name: mms-tts-${{ github.run_number }}
+          name: "🔊 MMS-TTS Indonesian #${{ github.run_number }}"
           body: |
             ### 🎧 Audio TTS - Gelmerbahn Story
-            - **Generated at**: ${{ github.event.head_commit.timestamp }}
-            - **Engine**: Piper TTS (id_ID-upik-low)
-            - **Text length**: $(wc -c < input.txt) characters
-            - **File size**: $(ls -lh ${{ steps.text-input.outputs.filename }} | awk '{print $5}')
+            - **Generated**: ${{ github.event.head_commit.timestamp || github.event.inputs.custom_text }}
+            - **Engine**: Facebook MMS-TTS Indonesian (`facebook/mms-tts-ind`)
+            - **Sampling Rate**: 16000 Hz
+            - **Text Length**: $(wc -c < input.txt) characters
             
             <details>
             <summary>📝 Preview Teks</summary>
             
-            ```
+            ```text
             $(cat input.txt)
             ```
             </details>
+            
+            > 💡 Download file `.wav` langsung dengan klik link di atas → tidak perlu ekstrak zip!
           files: |
             ${{ steps.text-input.outputs.filename }}
             input.txt
@@ -108,7 +132,9 @@ DEFAULT_TEXT
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Print Download Link
+      - name: Print Direct Download Link
         run: |
-          echo "✅ SUCCESS! Download your .wav file directly:"
+          echo ""
+          echo "✅ SUCCESS! Download your .wav file directly (no zip):"
           echo "🔗 https://github.com/${{ github.repository }}/releases/latest/download/${{ steps.text-input.outputs.filename }}"
+          echo ""
