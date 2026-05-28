@@ -1,140 +1,85 @@
-name: MMS-TTS Indonesian → GitHub Release
+name: 🎙️ MMS-TTS Indonesian
+
 on:
   workflow_dispatch:
     inputs:
-      custom_text:
-        description: 'Teks untuk TTS (kosong = pakai default Gelmerbahn)'
+      text:
+        description: "Teks untuk TTS (kosongkan untuk pakai default)"
         required: false
-        default: ''
-  push:
-    branches: [main]
-    paths:
-      - 'tts-input.txt'
+        default: "Jangan pernah coba-coba naik kereta ini kalau kamu punya riwayat penyakit jantung. Bukan di taman bermain, tapi ini adalah jalur transportasi nyata di pegunungan Swiss yang punya kemiringan hampir tegak lurus. Sekali lepas kendali, taruhannya nyawa. Nama tempatnya Gelmerbahn. Coba cek share ketiga kamu, berani gak dia kamu ajak ke sini?"
 
 jobs:
-  generate-tts:
+  generate-audio:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
       contents: write
-    
-    steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v4
 
-      - name: Setup Python
+    steps:
+      - name: 🐍 Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-          cache: 'pip'
+          cache: pip
 
-      - name: Install PyTorch CPU-only (dari PyTorch index)
+      - name: 📦 Install Dependencies
         run: |
           pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu --no-cache-dir
-
-      - name: Install Transformers & Dependencies (dari PyPI default)
-        run: |
           pip install transformers accelerate scipy soundfile --no-cache-dir
 
-      - name: Cache HuggingFace Models
+      - name: 💾 Cache MMS Model
         uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface
-          key: mms-tts-ind-v1-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            mms-tts-ind-v1-
-            mms-tts-ind-
+          key: mms-tts-ind-${{ runner.os }}
+          restore-keys: mms-tts-ind-
 
-      - name: Prepare Text Input
-        id: text-input
+      - name: 🔊 Generate TTS Audio
+        env:
+          TTS_TEXT: ${{ inputs.text }}
         run: |
-          if [ -n "${{ github.event.inputs.custom_text }}" ]; then
-            echo "📝 Using custom input from workflow_dispatch"
-            echo "${{ github.event.inputs.custom_text }}" > input.txt
-          elif [ -f tts-input.txt ]; then
-            echo "📝 Using text from tts-input.txt file"
-            cp tts-input.txt input.txt
-          else
-            echo "📝 Using default Gelmerbahn text"
-            cat > input.txt << 'DEFAULT_TEXT'
-Jangan pernah coba-coba naik kereta ini kalau kamu punya riwayat penyakit jantung. Bukan di taman bermain, tapi ini adalah jalur transportasi nyata di pegunungan Swiss yang punya kemiringan hampir tegak lurus. Sekali lepas kendali, taruhannya nyawa. Nama tempatnya Gelmerbahn. Coba cek share ketiga kamu, berani gak dia kamu ajak ke sini?
-DEFAULT_TEXT
-          fi
-          
-          # Generate unique filename based on text hash
-          HASH=$(echo -n "$(cat input.txt)" | md5sum | cut -c1-8)
-          echo "filename=gelmerbahn-mms-${HASH}.wav" >> $GITHUB_OUTPUT
-          echo "📄 Text length: $(wc -c < input.txt) characters"
-
-      - name: Generate Speech with MMS-TTS Indonesian
-        run: |
-          python - << 'PYTHON_SCRIPT'
+          python - << 'PY'
+          import os, hashlib, scipy, torch
           from transformers import VitsModel, AutoTokenizer
-          import torch, scipy, os, sys
-          
-          print("⏳ Loading MMS-TTS Indonesian model (facebook/mms-tts-ind)...")
-          model_id = "facebook/mms-tts-ind"
-          
-          # Load model dengan device CPU
-          model = VitsModel.from_pretrained(model_id)
-          tokenizer = AutoTokenizer.from_pretrained(model_id)
-          
-          # Baca teks dari file
-          with open("input.txt", "r", encoding="utf-8") as f:
-              text = f.read().strip()
-          
-          print(f"🔤 Text: {text[:100]}...")
-          print("🔊 Generating audio...")
-          
-          # Tokenize & generate
+
+          text = os.environ["TTS_TEXT"].strip()
+          if not text:
+              raise ValueError("Teks kosong. Harap isi pada form workflow_dispatch.")
+
+          print("📥 Memuat model MMS-TTS Indonesia...")
+          model = VitsModel.from_pretrained("facebook/mms-tts-ind")
+          tokenizer = AutoTokenizer.from_pretrained("facebook/mms-tts-ind")
+
+          print("🎙️ Mengonversi teks ke audio...")
           inputs = tokenizer(text, return_tensors="pt")
           with torch.no_grad():
-              output = model(**inputs).waveform
-          
-          # Save to WAV
-          output_file = os.environ.get("OUTPUT_FILE", "output.wav")
-          sampling_rate = model.config.sampling_rate
-          scipy.io.wavfile.write(output_file, rate=sampling_rate, data=output.numpy().squeeze())
-          
-          size_kb = os.path.getsize(output_file) / 1024
-          print(f"✅ Success: {output_file} ({size_kb:.1f} KB, {sampling_rate}Hz)")
-          PYTHON_SCRIPT
-        env:
-          OUTPUT_FILE: ${{ steps.text-input.outputs.filename }}
+              audio = model(**inputs).waveform
 
-      - name: Create/Update GitHub Release
+          # Nama file unik berdasarkan hash teks
+          file_hash = hashlib.md5(text.encode()).hexdigest()[:6]
+          filename = f"audio_{file_hash}.wav"
+          scipy.io.wavfile.write(filename, model.config.sampling_rate, audio.numpy().squeeze())
+          print(f"✅ Audio tersimpan: {filename}")
+
+          # Simpan nama file ke environment untuk step berikutnya
+          with open(os.environ["GITHUB_ENV"], "a") as f:
+              f.write(f"OUTPUT_FILE={filename}\n")
+          PY
+
+      - name: 🚀 Upload to Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: mms-tts-${{ github.run_number }}
-          name: "🔊 MMS-TTS Indonesian #${{ github.run_number }}"
+          tag_name: tts-${{ github.run_number }}
+          name: "🎧 Audio TTS #${{ github.run_number }}"
           body: |
-            ### 🎧 Audio TTS - Gelmerbahn Story
-            - **Generated**: ${{ github.event.head_commit.timestamp || github.event.inputs.custom_text }}
-            - **Engine**: Facebook MMS-TTS Indonesian (`facebook/mms-tts-ind`)
-            - **Sampling Rate**: 16000 Hz
-            - **Text Length**: $(wc -c < input.txt) characters
-            
-            <details>
-            <summary>📝 Preview Teks</summary>
-            
+            ### 📝 Teks yang Digunakan
             ```text
-            $(cat input.txt)
+            ${{ inputs.text }}
             ```
-            </details>
-            
-            > 💡 Download file `.wav` langsung dengan klik link di atas → tidak perlu ekstrak zip!
-          files: |
-            ${{ steps.text-input.outputs.filename }}
-            input.txt
+            > 💡 Klik file `.wav` di atas untuk download langsung (tidak perlu ekstrak ZIP).
+          files: ${{ env.OUTPUT_FILE }}
           draft: false
           prerelease: false
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Print Direct Download Link
-        run: |
-          echo ""
-          echo "✅ SUCCESS! Download your .wav file directly (no zip):"
-          echo "🔗 https://github.com/${{ github.repository }}/releases/latest/download/${{ steps.text-input.outputs.filename }}"
-          echo ""
