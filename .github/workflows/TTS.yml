@@ -1,23 +1,51 @@
-name: Generate TTS with Edge-TTS
+name: TTS Lokal dengan MeloTTS
 on: [workflow_dispatch]
 
 jobs:
-  tts:
+  melo-tts:
     runs-on: ubuntu-latest
     steps:
-      - name: Install edge-tts
-        run: pip install edge-tts
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Cache MeloTTS Model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/melo
+          key: melo-tts-id-v1
+          restore-keys: melo-tts-
+
+      - name: Install Dependencies
+        run: |
+          pip install melo-tts pydub
+          # pydub untuk konversi WAV → MP3 (opsional)
 
       - name: Generate Speech
         run: |
-          edge-tts \
-            --text "Halo! Ini adalah contoh text to speech gratis di GitHub Actions." \
-            --voice id-ID-GadisNeural \
-            --write-media output.mp3 \
-            --write-subtitles output.srt
+          python -c "
+          from melo.api import TTS
+          import torch
+          
+          device = 'cpu'  # GitHub Actions runner tidak punya GPU
+          model = TTS(language='ID', device=device)
+          text = 'Halo! Ini contoh text-to-speech dengan suara lokal Indonesia yang lebih natural.'
+          
+          model.tts_to_file(text, 'output.wav', speaker_id=0, speed=1.0)
+          print('✅ Audio berhasil di-generate!')
+          "
 
-      - name: Upload Output
+      - name: Convert to MP3 (Opsional)
+        run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg
+          ffmpeg -y -i output.wav -codec:a libmp3lame -qscale:a 2 output.mp3
+
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: tts-audio
-          path: output.mp3
+          name: melo-tts-audio
+          path: output.*
