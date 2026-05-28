@@ -1,60 +1,114 @@
-name: TTS Lokal dengan MMS-TTS Indonesian
-on: [workflow_dispatch]
+name: TTS Lokal → GitHub Release
+on:
+  workflow_dispatch:
+    inputs:
+      custom_text:
+        description: 'Teks untuk TTS (kosong = pakai default)'
+        required: false
+        default: ''
+  push:
+    branches: [main]
+    paths:
+      - 'tts-input.txt'  # Trigger jika file teks diubah
 
 jobs:
-  mms-tts:
+  generate-tts:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: write  # Diperlukan untuk upload ke Release
     
     steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Install PyTorch CPU-only (dari index khusus)
-        run: |
-          pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu --no-cache-dir
+      - name: Install Piper TTS
+        run: pip install piper-tts
 
-      - name: Install Other Dependencies (dari PyPI default)
-        run: |
-          pip install transformers accelerate scipy soundfile --no-cache-dir
-
-      - name: Cache HuggingFace Models
+      - name: Cache Indonesian Model
         uses: actions/cache@v4
         with:
-          path: ~/.cache/huggingface
-          key: mms-tts-ind-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: mms-tts-ind-
+          path: ~/.local/share/piper
+          key: piper-id-upik-low-v1
+          restore-keys: piper-id-
 
-      - name: Generate Speech
+      - name: Download Model (jika belum ada di cache)
         run: |
-          python - << 'EOF'
-          from transformers import VitsModel, AutoTokenizer
-          import torch, scipy, os, sys
-          
-          print("⏳ Loading MMS-TTS Indonesian model...")
-          model_id = "facebook/mms-tts-ind"
-          model = VitsModel.from_pretrained(model_id)
-          tokenizer = AutoTokenizer.from_pretrained(model_id)
-          
-          text = "Halo! Ini contoh text-to-speech dengan suara lokal Indonesia yang lebih natural."
-          inputs = tokenizer(text, return_tensors="pt")
-          
-          print("🔊 Generating audio...")
-          with torch.no_grad():
-              output = model(**inputs).waveform
-          
-          output_path = "output.wav"
-          sampling_rate = model.config.sampling_rate
-          scipy.io.wavfile.write(output_path, rate=sampling_rate, data=output.numpy().squeeze())
-          
-          size_kb = os.path.getsize(output_path) / 1024
-          print(f"✅ Success: {output_path} ({size_kb:.1f} KB, {sampling_rate}Hz)")
-          EOF
+          mkdir -p ~/.local/share/piper
+          if [ ! -f ~/.local/share/piper/id_ID-upik-low.onnx ]; then
+            echo "⏳ Downloading Piper Indonesian model..."
+            wget -q https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/id_ID/upik/low/id_ID-upik-low.onnx \
+              -O ~/.local/share/piper/id_ID-upik-low.onnx
+            wget -q https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/id_ID/upik/low/id_ID-upik-low.onnx.json \
+              -O ~/.local/share/piper/id_ID-upik-low.onnx.json
+            echo "✅ Model downloaded"
+          fi
 
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+      - name: Prepare Text Input
+        id: text-input
+        run: |
+          if [ -n "${{ github.event.inputs.custom_text }}" ]; then
+            echo "📝 Using custom input from workflow_dispatch"
+            echo "${{ github.event.inputs.custom_text }}" > input.txt
+          elif [ -f tts-input.txt ]; then
+            echo "📝 Using text from tts-input.txt file"
+            cp tts-input.txt input.txt
+          else
+            echo "📝 Using default Gelmerbahn text"
+            cat > input.txt << 'DEFAULT_TEXT'
+Jangan pernah coba-coba naik kereta ini kalau kamu punya riwayat penyakit jantung. Bukan di taman bermain, tapi ini adalah jalur transportasi nyata di pegunungan Swiss yang punya kemiringan hampir tegak lurus. Sekali lepas kendali, taruhannya nyawa. Nama tempatnya Gelmerbahn. Coba cek share ketiga kamu, berani gak dia kamu ajak ke sini?
+DEFAULT_TEXT
+          fi
+          # Generate filename based on text hash (untuk menghindari overwrite)
+          HASH=$(echo -n "$(cat input.txt)" | md5sum | cut -c1-8)
+          echo "filename=gelmerbahn-${HASH}.wav" >> $GITHUB_OUTPUT
+          echo "📄 Text preview: $(head -c 100 input.txt)..."
+
+      - name: Generate Speech with Piper
+        run: |
+          cat input.txt | piper \
+            --model ~/.local/share/piper/id_ID-upik-low.onnx \
+            --output_file ${{ steps.text-input.outputs.filename }} \
+            --speaker 0 \
+            --length_scale 0.95  # Sedikit lebih lambat agar lebih natural
+          
+          echo "✅ Audio generated: ${{ steps.text-input.outputs.filename }}"
+          ls -lh ${{ steps.text-input.outputs.filename }}
+
+      - name: Create/Update GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: mms-tts-indonesian-audio
-          path: output.wav
+          tag_name: tts-release-${{ github.run_number }}
+          name: "🔊 TTS Output #${{ github.run_number }}"
+          body: |
+            ### 🎧 Audio TTS - Gelmerbahn Story
+            - **Generated at**: ${{ github.event.head_commit.timestamp }}
+            - **Engine**: Piper TTS (id_ID-upik-low)
+            - **Text length**: $(wc -c < input.txt) characters
+            - **File size**: $(ls -lh ${{ steps.text-input.outputs.filename }} | awk '{print $5}')
+            
+            <details>
+            <summary>📝 Preview Teks</summary>
+            
+            ```
+            $(cat input.txt)
+            ```
+            </details>
+          files: |
+            ${{ steps.text-input.outputs.filename }}
+            input.txt
+          draft: false
+          prerelease: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Print Download Link
+        run: |
+          echo "✅ SUCCESS! Download your .wav file directly:"
+          echo "🔗 https://github.com/${{ github.repository }}/releases/latest/download/${{ steps.text-input.outputs.filename }}"
