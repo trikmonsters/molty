@@ -1,10 +1,21 @@
-name: TTS Lokal dengan MeloTTS (Fixed)
-on: [workflow_dispatch]
+# .github/workflows/tts-piper.yml
+name: Generate TTS dengan Piper (Indonesia)
+on:
+  workflow_dispatch:
+    inputs:
+      text:
+        description: 'Teks yang ingin diubah ke suara'
+        required: true
+        default: 'Halo! Ini contoh text-to-speech gratis di GitHub Actions dengan Piper.'
+      voice:
+        description: 'Voice ID (id_ID-upik-low / id_ID-upik-medium)'
+        required: false
+        default: 'id_ID-upik-low'
 
 jobs:
-  melo-tts:
+  piper-tts:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     
     steps:
       - name: Setup Python
@@ -12,49 +23,68 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install System Dependencies for MeCab
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y mecab libmecab-dev mecab-ipadic-utf8
+      - name: Install Piper
+        run: pip install piper-tts
 
-      - name: Install Python Dependencies
-        run: |
-          # PyTorch CPU-only (hemat bandwidth)
-          pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
-          
-          # MeCab Python bindings + lightweight dictionary
-          pip install mecab-python3 unidic-lite
-          
-          # MeloTTS dari GitHub
-          pip install git+https://github.com/myshell-ai/MeloTTS.git
-
-      - name: Cache Model
+      - name: Cache Model & Binary
         uses: actions/cache@v4
         with:
-          path: ~/.cache/melo
-          key: melo-tts-id-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: melo-tts-id-
+          path: |
+            ~/.local/share/piper
+            ~/.cache/piper
+          key: piper-${{ github.event.inputs.voice || 'id_ID-upik-low' }}-v1
+          restore-keys: piper-
+
+      - name: Download Model (jika belum ada di cache)
+        run: |
+          VOICE="${{ github.event.inputs.voice || 'id_ID-upik-low' }}"
+          mkdir -p ~/.local/share/piper
+          
+          if [ ! -f ~/.local/share/piper/${VOICE}.onnx ]; then
+            echo "⏳ Downloading model: $VOICE"
+            BASE_URL="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0"
+            PATH_PART="${VOICE//_//}"  # id_ID-upik-low → id/ID/upik/low
+            PATH_PART="${PATH_PART//id_ID/id/ID}"
+            
+            wget -q "${BASE_URL}/${PATH_PART}/${VOICE}.onnx" \
+              -O ~/.local/share/piper/${VOICE}.onnx
+            wget -q "${BASE_URL}/${PATH_PART}/${VOICE}.onnx.json" \
+              -O ~/.local/share/piper/${VOICE}.onnx.json
+            echo "✅ Model downloaded"
+          else
+            echo "✅ Model already cached"
+          fi
 
       - name: Generate Speech
         run: |
-          python -c "
-          from melo.api import TTS
-          import os, sys
+          TEXT="${{ github.event.inputs.text }}"
+          VOICE="${{ github.event.inputs.voice || 'id_ID-upik-low' }}"
+          MODEL_PATH="$HOME/.local/share/piper/${VOICE}.onnx"
           
-          print('⏳ Loading model Indonesia...')
-          model = TTS(language='ID', device='cpu')
+          echo "🎙️ Generating: $TEXT"
+          echo "$TEXT" | piper \
+            --model "$MODEL_PATH" \
+            --output_file output.wav \
+            --speaker 0 \
+            --length_scale 1.0 \
+            --noise_scale 0.667 \
+            --noise_w 0.8
           
-          text = 'Halo! Ini contoh text-to-speech dengan suara lokal Indonesia yang lebih natural.'
-          output = 'output.wav'
-          
-          model.tts_to_file(text, output, speaker_id=0, speed=1.0)
-          
-          size = os.path.getsize(output) / 1024
-          print(f'✅ Success: {output} ({size:.1f} KB)')
-          "
+          echo "✅ Audio generated: output.wav"
+
+      - name: Convert to MP3 (Opsional - lebih kecil)
+        run: |
+          if command -v ffmpeg &> /dev/null; then
+            ffmpeg -y -i output.wav -codec:a libmp3lame -qscale:a 2 output.mp3
+            echo "✅ Converted to MP3"
+          else
+            sudo apt-get update && sudo apt-get install -y ffmpeg
+            ffmpeg -y -i output.wav -codec:a libmp3lame -qscale:a 2 output.mp3
+          fi
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: melo-tts-output
-          path: output.wav
+          name: tts-output-${{ github.run_number }}
+          path: output.*
+          retention-days: 7
