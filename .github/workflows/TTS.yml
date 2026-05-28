@@ -12,43 +12,49 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install Dependencies
+      - name: Install PyTorch CPU-only (dari index khusus)
         run: |
-          pip install --upgrade transformers accelerate scipy torch torchaudio \
-            --index-url https://download.pytorch.org/whl/cpu
+          pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu --no-cache-dir
 
-      - name: Cache Model
+      - name: Install Other Dependencies (dari PyPI default)
+        run: |
+          pip install transformers accelerate scipy soundfile --no-cache-dir
+
+      - name: Cache HuggingFace Models
         uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface
-          key: mms-tts-ind-cache
-          restore-keys: mms-tts-
+          key: mms-tts-ind-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: mms-tts-ind-
 
       - name: Generate Speech
         run: |
           python - << 'EOF'
           from transformers import VitsModel, AutoTokenizer
-          import torch, scipy, os
+          import torch, scipy, os, sys
           
           print("⏳ Loading MMS-TTS Indonesian model...")
-          model = VitsModel.from_pretrained("facebook/mms-tts-ind")
-          tokenizer = AutoTokenizer.from_pretrained("facebook/mms-tts-ind")
+          model_id = "facebook/mms-tts-ind"
+          model = VitsModel.from_pretrained(model_id)
+          tokenizer = AutoTokenizer.from_pretrained(model_id)
           
-          text = "Halo! Ini contoh text-to-speech dengan suara lokal Indonesia yang lebih natural dan tidak kaku."
+          text = "Halo! Ini contoh text-to-speech dengan suara lokal Indonesia yang lebih natural."
           inputs = tokenizer(text, return_tensors="pt")
           
+          print("🔊 Generating audio...")
           with torch.no_grad():
               output = model(**inputs).waveform
           
           output_path = "output.wav"
-          scipy.io.wavfile.write(output_path, rate=model.config.sampling_rate, data=output.numpy().squeeze())
+          sampling_rate = model.config.sampling_rate
+          scipy.io.wavfile.write(output_path, rate=sampling_rate, data=output.numpy().squeeze())
           
           size_kb = os.path.getsize(output_path) / 1024
-          print(f"✅ Audio berhasil: {output_path} ({size_kb:.1f} KB)")
+          print(f"✅ Success: {output_path} ({size_kb:.1f} KB, {sampling_rate}Hz)")
           EOF
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mms-tts-indonesian
+          name: mms-tts-indonesian-audio
           path: output.wav
