@@ -22,7 +22,7 @@ tts = TTS(
 tts.tts_to_file(
     text=TEXT,
     speaker_wav="jokowi.mp3",
-    language="id",
+    language="en",
     file_path="output.wav"
 )
 
