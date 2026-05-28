@@ -1,29 +1,20 @@
-from TTS.api import TTS
-import torch
-import os
+from melo.api import TTS
 
-TEXT = """
-Halo semuanya.
-Ini adalah suara AI Indonesia menggunakan XTTS v2.
-Hasilnya jauh lebih natural dan stabil.
+text = """
+Halo semuanya...
+
+Hari ini kita akan membahas teknologi AI terbaru.
+
+Dan hasilnya keren banget.
 """
 
-if not os.path.exists("jokowi.mp3"):
-    raise FileNotFoundError("speaker.wav tidak ditemukan")
+model = TTS(language='ID')
 
-device = "cpu"
-
-tts = TTS(
-    model_name="tts_models/multilingual/multi-dataset/xtts_v2",
-    progress_bar=False,
-    gpu=False
+model.tts_to_file(
+    text=text,
+    speaker_id=0,
+    output_path='output.wav',
+    speed=1.0
 )
 
-tts.tts_to_file(
-    text=TEXT,
-    speaker_wav="jokowi.mp3",
-    language="en",
-    file_path="output.wav"
-)
-
-print("Selesai")
+print("Selesai generate")
