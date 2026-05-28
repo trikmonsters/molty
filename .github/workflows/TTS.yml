@@ -1,4 +1,4 @@
-name: 🎙️ MMS-TTS Indonesian
+name: 🎙️ Edge-TTS Indonesian
 
 on:
   workflow_dispatch:
@@ -7,11 +7,23 @@ on:
         description: "Teks untuk TTS (kosongkan untuk pakai default)"
         required: false
         default: "Jangan pernah coba-coba naik kereta ini kalau kamu punya riwayat penyakit jantung. Bukan di taman bermain, tapi ini adalah jalur transportasi nyata di pegunungan Swiss yang punya kemiringan hampir tegak lurus. Sekali lepas kendali, taruhannya nyawa. Nama tempatnya Gelmerbahn. Coba cek share ketiga kamu, berani gak dia kamu ajak ke sini?"
+      voice:
+        description: "Pilih voice (default: id-ID-GadisNeural)"
+        required: false
+        default: "id-ID-GadisNeural"
+        type: choice
+        options:
+          - id-ID-GadisNeural
+          - id-ID-ArdiNeural
+          - jv-ID-DimasNeural
+          - jv-ID-SitiNeural
+          - su-ID-JajangNeural
+          - su-ID-TutiNeural
 
 jobs:
   generate-audio:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     permissions:
       contents: write
 
@@ -20,61 +32,49 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-          # cache: pip dihapus karena tidak ada requirements.txt/pyproject.toml
 
       - name: 📦 Install Dependencies
         run: |
-          pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu --no-cache-dir
-          pip install transformers accelerate scipy soundfile --no-cache-dir
-
-      - name: 💾 Cache MMS Model
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/huggingface
-          key: mms-tts-ind-${{ runner.os }}
-          restore-keys: mms-tts-ind-
+          pip install edge-tts
+          sudo apt-get update && sudo apt-get install -y ffmpeg
 
       - name: 🔊 Generate TTS Audio
         env:
           TTS_TEXT: ${{ inputs.text }}
+          TTS_VOICE: ${{ inputs.voice }}
         run: |
-          python - << 'PY'
-          import os, hashlib, scipy, torch
-          from transformers import VitsModel, AutoTokenizer
+          if [ -z "$TTS_TEXT" ]; then
+            echo "❌ Error: Teks kosong."
+            exit 1
+          fi
 
-          text = os.environ["TTS_TEXT"].strip()
-          if not text:
-              raise ValueError("Teks kosong. Harap isi pada form workflow_dispatch.")
+          # Default voice jika kosong
+          VOICE="${TTS_VOICE:-id-ID-GadisNeural}"
+          FILE_HASH=$(echo -n "$TTS_TEXT" | md5sum | cut -c1-6)
+          MP3_FILE="audio_${FILE_HASH}.mp3"
+          WAV_FILE="audio_${FILE_HASH}.wav"
 
-          print("📥 Memuat model MMS-TTS Indonesia...")
-          model = VitsModel.from_pretrained("facebook/mms-tts-ind")
-          tokenizer = AutoTokenizer.from_pretrained("facebook/mms-tts-ind")
+          echo "$TTS_TEXT" > /tmp/tts_input.txt
+          echo "🎙️ Generating with voice: $VOICE"
+          
+          edge-tts --file /tmp/tts_input.txt --voice "$VOICE" --write-media "$MP3_FILE"
+          ffmpeg -y -i "$MP3_FILE" -acodec pcm_s16le -ar 44100 "$WAV_FILE"
 
-          print("🎙️ Mengonversi teks ke audio...")
-          inputs = tokenizer(text, return_tensors="pt")
-          with torch.no_grad():
-              audio = model(**inputs).waveform
-
-          file_hash = hashlib.md5(text.encode()).hexdigest()[:6]
-          filename = f"audio_{file_hash}.wav"
-          scipy.io.wavfile.write(filename, model.config.sampling_rate, audio.numpy().squeeze())
-          print(f"✅ Audio tersimpan: {filename}")
-
-          with open(os.environ["GITHUB_ENV"], "a") as f:
-              f.write(f"OUTPUT_FILE={filename}\n")
-          PY
+          echo "✅ Audio: $WAV_FILE"
+          echo "OUTPUT_FILE=$WAV_FILE" >> $GITHUB_ENV
 
       - name: 🚀 Upload to Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: tts-${{ github.run_number }}
-          name: "🎧 Audio TTS #${{ github.run_number }}"
+          tag_name: tts-edge-${{ github.run_number }}
+          name: "🎧 Edge-TTS #${{ github.run_number }}"
           body: |
-            ### 📝 Teks yang Digunakan
+            ### 📝 Teks
             ```text
             ${{ inputs.text }}
             ```
-            > 💡 Klik file `.wav` di atas untuk download langsung (tidak perlu ekstrak ZIP).
+            > 🎙️ Voice: `${{ inputs.voice }}`  
+            > 💡 Klik file `.wav` untuk download langsung (tanpa ZIP).
           files: ${{ env.OUTPUT_FILE }}
           draft: false
           prerelease: false
