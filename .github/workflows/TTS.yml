@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  tts:
+  xtts:
     runs-on: ubuntu-latest
 
     env:
@@ -20,15 +20,17 @@ jobs:
       - name: Install ffmpeg
         run: |
           sudo apt update
-          sudo apt install ffmpeg -y
+          sudo apt install -y ffmpeg
 
-      - name: Install Torch CPU
+      - name: Install torch CPU
         run: |
           pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 
-      - name: Install XTTS
+      - name: Install XTTS dependencies
         run: |
-          pip install TTS
+          pip install TTS==0.22.0
+          pip install transformers==4.38.2
+          pip install numpy==1.26.4
 
       - name: Run XTTS
         run: |
