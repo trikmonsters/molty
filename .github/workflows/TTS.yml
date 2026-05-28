@@ -1,10 +1,10 @@
-name: TTS Lokal dengan MeloTTS
+name: TTS Lokal dengan MeloTTS (Fixed)
 on: [workflow_dispatch]
 
 jobs:
   melo-tts:
     runs-on: ubuntu-latest
-    timeout-minutes: 10 # Batas aman untuk cold start + generate
+    timeout-minutes: 15
     
     steps:
       - name: Setup Python
@@ -12,44 +12,49 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install Dependencies
+      - name: Install System Dependencies for MeCab
         run: |
-          # 1. PyTorch CPU-only (hindari download CUDA ~2GB)
+          sudo apt-get update
+          sudo apt-get install -y mecab libmecab-dev mecab-ipadic-utf8
+
+      - name: Install Python Dependencies
+        run: |
+          # PyTorch CPU-only (hemat bandwidth)
           pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
           
-          # 2. MeloTTS dari GitHub (tidak ada di PyPI)
+          # MeCab Python bindings + lightweight dictionary
+          pip install mecab-python3 unidic-lite
+          
+          # MeloTTS dari GitHub
           pip install git+https://github.com/myshell-ai/MeloTTS.git
 
-      - name: Cache Model & Dependencies
+      - name: Cache Model
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.cache/melo
-            ~/.cache/torch
-          key: melo-tts-id-cache-${{ hashFiles('requirements.txt') }}
-          restore-keys: |
-            melo-tts-id-cache-
+          path: ~/.cache/melo
+          key: melo-tts-id-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: melo-tts-id-
 
       - name: Generate Speech
         run: |
-          python - << 'PYTHON_SCRIPT'
+          python -c "
           from melo.api import TTS
-          import os
-
-          print("⏳ Memuat model Indonesia... (hanya lambat di run pertama)")
+          import os, sys
+          
+          print('⏳ Loading model Indonesia...')
           model = TTS(language='ID', device='cpu')
           
-          text = "Halo! Ini contoh text-to-speech dengan suara lokal Indonesia yang lebih natural dan tidak kaku."
-          output_file = "output.wav"
+          text = 'Halo! Ini contoh text-to-speech dengan suara lokal Indonesia yang lebih natural.'
+          output = 'output.wav'
           
-          model.tts_to_file(text, output_file, speaker_id=0, speed=1.0)
+          model.tts_to_file(text, output, speaker_id=0, speed=1.0)
           
-          size_kb = os.path.getsize(output_file) / 1024
-          print(f"✅ Audio berhasil: {output_file} ({size_kb:.1f} KB)")
-          PYTHON_SCRIPT
+          size = os.path.getsize(output) / 1024
+          print(f'✅ Success: {output} ({size:.1f} KB)')
+          "
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: melo-tts-indonesian
+          name: melo-tts-output
           path: output.wav
