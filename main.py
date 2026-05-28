@@ -1,13 +1,30 @@
-from kokoro import KPipeline
-import soundfile as sf
+import os
+import subprocess
 
-pipeline = KPipeline(lang_code='a')  # English
-
-text = """
-Hello, this is Kokoro TTS running on GitHub Actions.
+TEXT = """
+Halo semuanya.
+Ini adalah contoh suara AI Indonesia yang sangat natural
+menggunakan F5 TTS dan voice cloning.
 """
 
-generator = pipeline(text, voice='af_heart')
+REFERENCE_TEXT = """
+Halo semuanya saya sedang mencoba teknologi suara AI terbaru.
+"""
 
-for i, (gs, ps, audio) in enumerate(generator):
-    sf.write(f'output_{i}.wav', audio, 24000)
+# simpan text
+with open("gen.txt", "w", encoding="utf-8") as f:
+    f.write(TEXT)
+
+# generate
+cmd = [
+    "f5-tts_infer-cli",
+    "--model", "F5TTS_v1_Base",
+    "--ref_audio", "speaker.wav",
+    "--ref_text", REFERENCE_TEXT,
+    "--gen_text", TEXT,
+    "--output_dir", "output"
+]
+
+subprocess.run(cmd, check=True)
+
+print("Selesai generate suara")
