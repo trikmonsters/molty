@@ -1,29 +1,10 @@
-name: Kokoro TTS
+from f5_tts.api import F5TTS
 
-on:
-  workflow_dispatch:
+tts = F5TTS()
 
-jobs:
-  tts:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install deps
-        run: |
-          pip install kokoro onnxruntime soundfile
-
-      - name: Run TTS
-        run: python main.py
-
-      - name: Upload Audio
-        uses: actions/upload-artifact@v4
-        with:
-          name: tts-audio
-          path: "*.wav"
+tts.infer(
+    ref_file="suara_orang.wav",
+    ref_text="Halo semuanya saya sedang mencoba suara AI.",
+    gen_text="Halo teman teman ini suara AI yang mirip manusia asli Indonesia.",
+    file_wave="output.wav"
+)
