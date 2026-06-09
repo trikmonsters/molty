@@ -1,20 +1,20 @@
-name: Download YouTube Short to Release (Secure Cookie)
+name: Download YouTube Short to Release (Fix N-Challenge)
 
 on:
-  workflow_dispatch: # Jalankan manual lewat tombol di GitHub
+  workflow_dispatch:
 
 jobs:
   download-and-release:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Izin untuk membuat Release aset
+      contents: write
 
     steps:
     # 1. Ambil kode dari repository
     - name: Checkout Repository
       uses: actions/checkout@v4
 
-    # 2. Setup Python dan FFmpeg untuk menyatukan Audio & Video
+    # 2. Setup Python dan FFmpeg untuk penggabungan video
     - name: Set up Python & FFmpeg
       uses: actions/setup-python@v5
       with:
@@ -25,34 +25,40 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y ffmpeg
 
-    # 3. Setup Node.js sebagai JavaScript Runtime untuk yt-dlp
+    # 3. Setup Node.js dan install dependensi solver untuk JavaScript Challenge YouTube
     - name: Set up Node.js (JS Runtime)
       uses: actions/setup-node@v4
       with:
         node-version: '20'
 
-    # 4. Install/Update yt-dlp versi terbaru
+    # Langkah Tambahan: Menginstal phantomjs agar yt-dlp bisa memecahkan enkripsi n-code
+    - name: Install JS Challenge Solver Dependecies
+      run: |
+        npm install -g phantomjs-prebuilt
+
+    # 4. Install/Update yt-dlp ke versi terbaru
     - name: Install yt-dlp
       run: |
         sudo pip install --upgrade yt-dlp
 
-    # 5. Generate file cookie dari GitHub Secret secara aman sebelum download
+    # 5. Generate file cookie dari GitHub Secret
     - name: Generate Temporary Cookie File
       run: |
         echo "${{ secrets.YT_SECURE_COOKIES }}" > secret_cookies.txt
 
-    # 6. Download Video menggunakan otentikasi Cookie Akun Cadangan
+    # 6. Jalankan download dengan fallback format jika bestvideo disembunyikan
+    # Perubahan format: Jika format terpisah error, ia akan otomatis mengambil mp4 komplit ("b")
     - name: Download Video Using Bot Bypass
       run: |
-        yt-dlp -f "bestvideo+bestaudio/best" \
+        yt-dlp -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/b[ext=mp4]/best" \
           --merge-output-format mp4 \
           --cookies secret_cookies.txt \
           "https://youtube.com/shorts/XYa54DRkC9Q" \
           -o "Kasur_Paling_Nyaman.mp4"
 
-    # 7. Hapus file cookie dari server demi keamanan privasi berkala
+    # 7. Bersihkan file cookie setelah selesai
     - name: Clean up Cookie File
-      if: always() # Langkah ini akan tetap berjalan meskipun proses download gagal/sukses
+      if: always()
       run: rm -f secret_cookies.txt
 
     # 8. Upload hasil download .mp4 ke GitHub Release
@@ -61,5 +67,5 @@ jobs:
       with:
         tag_name: "v${{ github.run_number }}"
         name: "Download Hasil #${{ github.run_number }}"
-        body: "Berhasil mengunduh YouTube Shorts dengan resolusi terbaik via Otentikasi Akun Cadangan."
+        body: "Berhasil mengunduh YouTube Shorts setelah melewati proteksi bot dan perbaikan n-challenge enkripsi."
         files: Kasur_Paling_Nyaman.mp4
