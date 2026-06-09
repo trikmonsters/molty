@@ -1,20 +1,20 @@
-name: Download YouTube Short (Fully Automated)
+name: Download YouTube Short to Release
 
 on:
-  workflow_dispatch: # Tinggal klik tombol Run, langsung jalan otomatis
+  workflow_dispatch: # Membuat tombol manual "Run workflow" di tab Actions
 
 jobs:
   download-and-release:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write # Wajib aktif agar GitHub Actions punya izin membuat rilis baru
 
     steps:
-    # 1. Ambil kode repository
+    # 1. Mengambil kode dari repository
     - name: Checkout Repository
       uses: actions/checkout@v4
 
-    # 2. Setup Python & FFmpeg (Wajib untuk merge video + audio)
+    # 2. Menyiapkan Python dan FFmpeg (Penting untuk menyatukan video HD + audio)
     - name: Set up Python & FFmpeg
       uses: actions/setup-python@v5
       with:
@@ -25,27 +25,31 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y ffmpeg
 
-    # 3. Install/Update yt-dlp versi paling baru (paling krusial)
+    # 3. Menyiapkan Node.js sebagai JavaScript Runtime pendukung yt-dlp
+    - name: Set up Node.js (JS Runtime)
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    # 4. Mengunduh dan memperbarui yt-dlp ke versi paling mutakhir
     - name: Install yt-dlp
       run: |
         sudo pip install --upgrade yt-dlp
 
-    # 4. Download otomatis menggunakan Web API Klien Alternatif
-    # Trik utama: Menggunakan klien 'tv' atau 'android' yang tidak seketat web biasa
+    # 5. Proses mengunduh video Shorts menggunakan trik Klien Alternatif (Bypass Bot)
     - name: Download Video Automatically
       run: |
         yt-dlp -f "bestvideo+bestaudio/best" \
           --merge-output-format mp4 \
-          --extractor-args "youtube:player-client=tv,html5" \
-          --no-warnings \
+          --extractor-args "youtube:player-client=android_creator,mweb" \
           "https://youtube.com/shorts/XYa54DRkC9Q" \
           -o "Kasur_Paling_Nyaman.mp4"
 
-    # 5. Simpan langsung ke GitHub Release
+    # 6. Mengunggah file video .mp4 yang berhasil digabung ke GitHub Release
     - name: Upload to GitHub Release
       uses: softprops/action-gh-release@v2
       with:
         tag_name: "v${{ github.run_number }}"
-        name: "Auto Download #${{ github.run_number }}"
-        body: "Unduhan otomatis YouTube Shorts berhasil tanpa menggunakan cookie manual."
+        name: "Auto Download Hasil #${{ github.run_number }}"
+        body: "Berhasil mengunduh YouTube Shorts dengan resolusi terbaik dan bypass deteksi bot secara otomatis."
         files: Kasur_Paling_Nyaman.mp4
