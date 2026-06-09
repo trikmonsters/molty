@@ -1,4 +1,4 @@
-name: Download YouTube Short to Release (Bypass System)
+name: Download YouTube Short to Release (Final Fix)
 
 on:
   workflow_dispatch:
@@ -25,24 +25,43 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y ffmpeg
 
-    # 3. Install/Update yt-dlp ke versi terbaru
+    # 3. Setup Node.js (Wajib sebagai basic JS runtime)
+    - name: Set up Node.js (JS Runtime)
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    # 4. Install & Update yt-dlp ke versi mutakhir
     - name: Install yt-dlp
       run: |
         sudo pip install --upgrade yt-dlp
 
-    # 4. Ambil video via direct stream proxy (Bypass n-challenge & Cookies)
-    - name: Download Video Automatically
+    # 5. Generate file cookie dari GitHub Secret Anda
+    - name: Generate Temporary Cookie File
       run: |
-        yt-dlp -f "best" \
-          --no-check-certificates \
-          "https://inv.tux.digital/latest_version?id=XYa54DRkC9Q&itag=22" \
+        echo "${{ secrets.YT_SECURE_COOKIES }}" > secret_cookies.txt
+
+    # 6. Jalankan download dengan mematikan pengecekan webpage web normal
+    # Kita paksa yt-dlp hanya meminta data dari API Android murni (Bypass N-Challenge Web)
+    - name: Download Video Using Android Client API
+      run: |
+        yt-dlp -f "bv+ba/b" \
+          --merge-output-format mp4 \
+          --extractor-args "youtube:player-client=android;skip=webpage" \
+          --cookies secret_cookies.txt \
+          "https://youtube.com/shorts/XYa54DRkC9Q" \
           -o "Kasur_Paling_Nyaman.mp4"
 
-    # 5. Upload hasil download .mp4 ke GitHub Release
+    # 7. Bersihkan file cookie setelah selesai
+    - name: Clean up Cookie File
+      if: always()
+      run: rm -f secret_cookies.txt
+
+    # 8. Upload hasil download .mp4 ke GitHub Release
     - name: Upload to GitHub Release
       uses: softprops/action-gh-release@v2
       with:
         tag_name: "v${{ github.run_number }}"
         name: "Download Hasil #${{ github.run_number }}"
-        body: "Berhasil mengunduh video dengan bypass enkripsi n-challenge YouTube via Invidious Stream."
+        body: "Berhasil mengunduh YouTube Shorts setelah melewati proteksi bot dan perbaikan n-challenge via Android API Client."
         files: Kasur_Paling_Nyaman.mp4
