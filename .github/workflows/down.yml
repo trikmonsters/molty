@@ -1,20 +1,20 @@
-name: Download YouTube Short to Release
+name: Download YouTube Short (Fully Automated)
 
 on:
-  workflow_dispatch: # Tombol jalankan manual di GitHub Actions
+  workflow_dispatch: # Tinggal klik tombol Run, langsung jalan otomatis
 
 jobs:
   download-and-release:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Wajib agar Actions punya izin membuat Release
+      contents: write
 
     steps:
-    # 1. Checkout repository
+    # 1. Ambil kode repository
     - name: Checkout Repository
       uses: actions/checkout@v4
 
-    # 2. Set up Python & FFmpeg (untuk menggabungkan audio + video)
+    # 2. Setup Python & FFmpeg (Wajib untuk merge video + audio)
     - name: Set up Python & FFmpeg
       uses: actions/setup-python@v5
       with:
@@ -25,21 +25,27 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y ffmpeg
 
-    # 3. UPDATE: Menggunakan yt-dlp menggantikan youtube-dl yang usang
+    # 3. Install/Update yt-dlp versi paling baru (paling krusial)
     - name: Install yt-dlp
       run: |
         sudo pip install --upgrade yt-dlp
 
-    # 4. Download Video menggunakan yt-dlp (Perintah tetap sama persis)
-    - name: Download Video
+    # 4. Download otomatis menggunakan Web API Klien Alternatif
+    # Trik utama: Menggunakan klien 'tv' atau 'android' yang tidak seketat web biasa
+    - name: Download Video Automatically
       run: |
-        yt-dlp -f "bestvideo+bestaudio/best" --merge-output-format mp4 "https://youtube.com/shorts/XYa54DRkC9Q" -o "Kasur_Paling_Nyaman.mp4"
+        yt-dlp -f "bestvideo+bestaudio/best" \
+          --merge-output-format mp4 \
+          --extractor-args "youtube:player-client=tv,html5" \
+          --no-warnings \
+          "https://youtube.com/shorts/XYa54DRkC9Q" \
+          -o "Kasur_Paling_Nyaman.mp4"
 
-    # 5. Upload hasil download langsung ke GitHub Release
+    # 5. Simpan langsung ke GitHub Release
     - name: Upload to GitHub Release
       uses: softprops/action-gh-release@v2
       with:
         tag_name: "v${{ github.run_number }}"
-        name: "Download Hasil #${{ github.run_number }}"
-        body: "Berhasil mengunduh YouTube Shorts dengan resolusi terbaik dan audio utuh."
+        name: "Auto Download #${{ github.run_number }}"
+        body: "Unduhan otomatis YouTube Shorts berhasil tanpa menggunakan cookie manual."
         files: Kasur_Paling_Nyaman.mp4
