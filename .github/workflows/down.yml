@@ -25,21 +25,21 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y ffmpeg
 
-    # 3. Install youtube-dl lama
-    - name: Install youtube-dl
+    # 3. UPDATE: Menggunakan yt-dlp menggantikan youtube-dl yang usang
+    - name: Install yt-dlp
       run: |
-        sudo pip install --upgrade youtube-dl
+        sudo pip install --upgrade yt-dlp
 
-    # 4. Download Video menggunakan youtube-dl
+    # 4. Download Video menggunakan yt-dlp (Perintah tetap sama persis)
     - name: Download Video
       run: |
-        youtube-dl -f "bestvideo+bestaudio/best" --merge-output-format mp4 "https://youtube.com/shorts/XYa54DRkC9Q" -o "Kasur_Paling_Nyaman.mp4"
+        yt-dlp -f "bestvideo+bestaudio/best" --merge-output-format mp4 "https://youtube.com/shorts/XYa54DRkC9Q" -o "Kasur_Paling_Nyaman.mp4"
 
     # 5. Upload hasil download langsung ke GitHub Release
     - name: Upload to GitHub Release
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: "v${{ github.run_number }}" # Menggunakan nomor menjalankan otomatis sebagai tag (misal: v1, v2)
+        tag_name: "v${{ github.run_number }}"
         name: "Download Hasil #${{ github.run_number }}"
-        body: "Berhasil mengunduh YouTube Shorts menggunakan youtube-dl."
+        body: "Berhasil mengunduh YouTube Shorts dengan resolusi terbaik dan audio utuh."
         files: Kasur_Paling_Nyaman.mp4
