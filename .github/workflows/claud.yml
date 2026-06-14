@@ -43,7 +43,6 @@ jobs:
       - name: 📁 Buat folder output
         run: mkdir -p ~/downloads
 
-      # ── Setup & FIX cookies dari Secret ───────────────────
       - name: 🍪 Setup & fix cookies
         env:
           YT_SECURE_COOKIES: ${{ secrets.YT_SECURE_COOKIES }}
@@ -54,50 +53,52 @@ jobs:
           fi
 
           printf '%s\n' "$YT_SECURE_COOKIES" > ~/cookies_raw.txt
-          echo "📄 Raw cookies: $(wc -l < ~/cookies_raw.txt) baris"
 
-          # Fix format: spasi antar kolom → tab (Netscape format butuh TAB)
           python3 - << 'PYEOF'
-          import re, os
-          
-          src = os.path.expanduser("~/cookies_raw.txt")
-          dst = os.path.expanduser("~/cookies.txt")
-          out = []
-          
-          with open(src, encoding="utf-8", errors="replace") as f:
-              for line in f:
-                  line = line.rstrip("\r\n")
-                  # Komentar & HttpOnly prefix
-                  if line.startswith("#") or not line.strip():
-                      out.append(line)
-                      continue
-                  # Hapus prefix #HttpOnly_ jika ada (beberapa exporter pakai ini)
-                  if line.startswith("#HttpOnly_"):
-                      line = line[len("#HttpOnly_"):]
-                  # Split by tab dulu, kalau hasilnya 7 kolom sudah benar
-                  parts = line.split("\t")
-                  if len(parts) >= 7:
-                      out.append("\t".join(parts))
-                      continue
-                  # Split by 2+ spasi sebagai fallback
-                  parts = re.split(r'  +', line.strip())
-                  parts = [p.strip() for p in parts if p.strip()]
-                  if len(parts) >= 7:
-                      out.append("\t".join(parts[:6] + [" ".join(parts[6:])]))
-                  elif len(parts) > 0:
-                      out.append("\t".join(parts))
-          
-          with open(dst, "w", encoding="utf-8") as f:
-              f.write("\n".join(out) + "\n")
-          
-          yt_lines = [l for l in out if "youtube.com" in l and not l.startswith("#")]
-          print(f"✅ Total baris: {len(out)}, cookie YouTube: {len(yt_lines)}")
-          if yt_lines:
-              # Tampilkan nama cookie saja (tanpa value)
-              for l in yt_lines[:5]:
-                  cols = l.split("\t")
-                  print(f"  · {cols[0]} → {cols[5] if len(cols)>5 else '?'}")
-          PYEOF
+import re, os
+
+src = os.path.expanduser("~/cookies_raw.txt")
+dst = os.path.expanduser("~/cookies.txt")
+out = []
+
+with open(src, encoding="utf-8", errors="replace") as f:
+    for line in f:
+        line = line.rstrip("\r\n")
+        if line.startswith("#") or not line.strip():
+            out.append(line)
+            continue
+        if line.startswith("#HttpOnly_"):
+            line = line[len("#HttpOnly_"):]
+        parts = line.split("\t")
+        if len(parts) >= 7:
+            out.append("\t".join(parts))
+            continue
+        parts = re.split(r'  +', line.strip())
+        parts = [p.strip() for p in parts if p.strip()]
+        if len(parts) >= 7:
+            out.append("\t".join(parts[:6] + [" ".join(parts[6:])]))
+        elif len(parts) > 0:
+            out.append("\t".join(parts))
+
+with open(dst, "w", encoding="utf-8") as f:
+    f.write("\n".join(out) + "\n")
+
+yt_lines = [l for l in out if "youtube.com" in l and not l.startswith("#")]
+print(f"✅ Total baris: {len(out)}, cookie YouTube: {len(yt_lines)}")
+PYEOF
+
+      # ── Cek format tersedia ───────────────────────────────
+      - name: 🔎 Cek format tersedia
+        run: |
+          URL="${{ inputs.url }}"
+          echo "📋 Format tersedia untuk: $URL"
+          yt-dlp \
+            --no-warnings \
+            --no-check-certificates \
+            --cookies ~/cookies.txt \
+            --extractor-args "youtube:player_client=web_creator,tv_embedded,ios" \
+            --list-formats \
+            "$URL" 2>&1 || true
 
       # ── Download ──────────────────────────────────────────
       - name: 🎬 Download
@@ -106,7 +107,7 @@ jobs:
           FORMAT="${{ inputs.format }}"
           SUBTITLE="${{ inputs.subtitle }}"
 
-          ARGS=(
+          BASE_ARGS=(
             --no-warnings
             --progress
             --retries 10
@@ -118,29 +119,47 @@ jobs:
             --restrict-filenames
             --no-check-certificates
             --cookies ~/cookies.txt
-            --extractor-args "youtube:player_client=tv_embedded,web_creator,ios"
+            --extractor-args "youtube:player_client=web_creator,tv_embedded,ios"
           )
 
           if [ -n "$SUBTITLE" ]; then
-            ARGS+=(--write-subs --write-auto-subs --sub-langs "$SUBTITLE" --embed-subs)
+            BASE_ARGS+=(--write-subs --write-auto-subs --sub-langs "$SUBTITLE" --embed-subs)
           fi
 
+          # Format selector — selalu ada fallback ke "best" agar tidak gagal
           case "$FORMAT" in
-            video-best)    ARGS+=(-f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best") ;;
-            video-1080p)   ARGS+=(-f "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]") ;;
-            video-720p)    ARGS+=(-f "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]") ;;
-            video-480p)    ARGS+=(-f "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480]") ;;
-            audio-mp3-320) ARGS+=(-f "bestaudio/best" -x --audio-format mp3 --audio-quality 0) ;;
-            audio-mp3-192) ARGS+=(-f "bestaudio/best" -x --audio-format mp3 --audio-quality 5) ;;
-            audio-m4a)     ARGS+=(-f "bestaudio[ext=m4a]/bestaudio/best" -x --audio-format m4a) ;;
+            video-best)
+              FORMAT_SEL="bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio/bestvideo+bestaudio/best"
+              ;;
+            video-1080p)
+              FORMAT_SEL="bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
+              ;;
+            video-720p)
+              FORMAT_SEL="bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[height<=720]/best"
+              ;;
+            video-480p)
+              FORMAT_SEL="bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=480]+bestaudio/best[height<=480]/best"
+              ;;
+            audio-mp3-320)
+              FORMAT_SEL="bestaudio/best"
+              BASE_ARGS+=(-x --audio-format mp3 --audio-quality 0)
+              ;;
+            audio-mp3-192)
+              FORMAT_SEL="bestaudio/best"
+              BASE_ARGS+=(-x --audio-format mp3 --audio-quality 5)
+              ;;
+            audio-m4a)
+              FORMAT_SEL="bestaudio[ext=m4a]/bestaudio/best"
+              BASE_ARGS+=(-x --audio-format m4a)
+              ;;
           esac
 
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "🎯 URL    : $URL"
-          echo "📦 Format : $FORMAT"
+          echo "📦 Format : $FORMAT → $FORMAT_SEL"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-          yt-dlp "${ARGS[@]}" "$URL"
+          yt-dlp "${BASE_ARGS[@]}" -f "$FORMAT_SEL" "$URL"
 
       - name: 📊 Info hasil
         if: always()
