@@ -25,13 +25,6 @@ on:
         required: false
         default: ''
         type: string
-      cookies_paste:
-        description: |
-          Paste isi cookies Netscape di sini (dari Cookie Editor → Export → Netscape).
-          Dimulai dengan baris: # Netscape HTTP Cookie File
-        required: false
-        default: ''
-        type: string
 
 jobs:
   download:
@@ -50,50 +43,61 @@ jobs:
       - name: 📁 Buat folder output
         run: mkdir -p ~/downloads
 
-      # ── Prioritas 1: dari input langsung (paste) ──────────
-      - name: 🍪 Setup cookies dari input
-        if: ${{ inputs.cookies_paste != '' }}
-        run: |
-          cat > ~/cookies.txt << 'COOKIESEOF'
-          ${{ inputs.cookies_paste }}
-          COOKIESEOF
-          # Hapus indentasi spasi di awal tiap baris
-          sed -i 's/^[[:space:]]*//' ~/cookies.txt
-          echo "✅ Cookies dari input: $(wc -l < ~/cookies.txt) baris"
-          head -2 ~/cookies.txt
-
-      # ── Prioritas 2: dari GitHub Secret ───────────────────
-      - name: 🍪 Setup cookies dari Secret (fallback)
-        if: ${{ inputs.cookies_paste == '' }}
+      # ── Setup & FIX cookies dari Secret ───────────────────
+      - name: 🍪 Setup & fix cookies
         env:
-          YT_COOKIES: ${{ secrets.YT_SECURE_COOKIES }}
+          YT_SECURE_COOKIES: ${{ secrets.YT_SECURE_COOKIES }}
         run: |
-          if [ -n "$YT_COOKIES" ]; then
-            printf '%s\n' "$YT_COOKIES" > ~/cookies.txt
-            echo "✅ Cookies dari Secret: $(wc -l < ~/cookies.txt) baris"
-            head -2 ~/cookies.txt
-          else
-            echo "⚠️  Tidak ada cookies — download kemungkinan gagal"
+          if [ -z "$YT_SECURE_COOKIES" ]; then
+            echo "❌ Secret YT_SECURE_COOKIES tidak ditemukan!"
+            exit 1
           fi
 
-      # ── Validasi cookies ──────────────────────────────────
-      - name: 🔍 Validasi cookies
-        run: |
-          if [ -f ~/cookies.txt ]; then
-            echo "📄 Preview cookies.txt:"
-            head -5 ~/cookies.txt
-            echo "---"
-            # Cek apakah ada cookie .youtube.com
-            if grep -q "youtube.com" ~/cookies.txt; then
-              echo "✅ Cookie YouTube ditemukan"
-            else
-              echo "⚠️  Tidak ada cookie youtube.com — pastikan export dari youtube.com"
-            fi
-            # Hapus baris kosong di awal jika ada
-            sed -i '/^$/d' ~/cookies.txt
-          else
-            echo "❌ cookies.txt tidak ada"
-          fi
+          printf '%s\n' "$YT_SECURE_COOKIES" > ~/cookies_raw.txt
+          echo "📄 Raw cookies: $(wc -l < ~/cookies_raw.txt) baris"
+
+          # Fix format: spasi antar kolom → tab (Netscape format butuh TAB)
+          python3 - << 'PYEOF'
+          import re, os
+          
+          src = os.path.expanduser("~/cookies_raw.txt")
+          dst = os.path.expanduser("~/cookies.txt")
+          out = []
+          
+          with open(src, encoding="utf-8", errors="replace") as f:
+              for line in f:
+                  line = line.rstrip("\r\n")
+                  # Komentar & HttpOnly prefix
+                  if line.startswith("#") or not line.strip():
+                      out.append(line)
+                      continue
+                  # Hapus prefix #HttpOnly_ jika ada (beberapa exporter pakai ini)
+                  if line.startswith("#HttpOnly_"):
+                      line = line[len("#HttpOnly_"):]
+                  # Split by tab dulu, kalau hasilnya 7 kolom sudah benar
+                  parts = line.split("\t")
+                  if len(parts) >= 7:
+                      out.append("\t".join(parts))
+                      continue
+                  # Split by 2+ spasi sebagai fallback
+                  parts = re.split(r'  +', line.strip())
+                  parts = [p.strip() for p in parts if p.strip()]
+                  if len(parts) >= 7:
+                      out.append("\t".join(parts[:6] + [" ".join(parts[6:])]))
+                  elif len(parts) > 0:
+                      out.append("\t".join(parts))
+          
+          with open(dst, "w", encoding="utf-8") as f:
+              f.write("\n".join(out) + "\n")
+          
+          yt_lines = [l for l in out if "youtube.com" in l and not l.startswith("#")]
+          print(f"✅ Total baris: {len(out)}, cookie YouTube: {len(yt_lines)}")
+          if yt_lines:
+              # Tampilkan nama cookie saja (tanpa value)
+              for l in yt_lines[:5]:
+                  cols = l.split("\t")
+                  print(f"  · {cols[0]} → {cols[5] if len(cols)>5 else '?'}")
+          PYEOF
 
       # ── Download ──────────────────────────────────────────
       - name: 🎬 Download
@@ -113,15 +117,9 @@ jobs:
             -o "$HOME/downloads/%(title)s [%(id)s].%(ext)s"
             --restrict-filenames
             --no-check-certificates
+            --cookies ~/cookies.txt
             --extractor-args "youtube:player_client=tv_embedded,web_creator,ios"
           )
-
-          if [ -f ~/cookies.txt ] && grep -q "youtube.com" ~/cookies.txt; then
-            ARGS+=(--cookies ~/cookies.txt)
-            echo "🍪 Menggunakan cookies"
-          else
-            echo "⚠️  Lanjut tanpa cookies"
-          fi
 
           if [ -n "$SUBTITLE" ]; then
             ARGS+=(--write-subs --write-auto-subs --sub-langs "$SUBTITLE" --embed-subs)
@@ -148,7 +146,7 @@ jobs:
         if: always()
         run: |
           if ls ~/downloads/* 2>/dev/null; then
-            echo "✅ File berhasil diunduh:"
+            echo "✅ Berhasil:"
             ls -lh ~/downloads/
           else
             echo "❌ Tidak ada file"
