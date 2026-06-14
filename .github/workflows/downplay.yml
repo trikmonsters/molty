@@ -28,7 +28,7 @@ jobs:
       - name: Install dependencies
         run: |
           npm init -y
-          npm install playwright axios
+          npm install playwright
 
       - name: Install Playwright Chromium
         run: npx playwright install chromium --with-deps
@@ -42,20 +42,20 @@ jobs:
           const http = require('http');
 
           const YOUTUBE_URL = process.env.YOUTUBE_URL || 'https://youtube.com/shorts/CIbeRYMGfbk';
-          const QUALITY = (process.env.QUALITY || '720p').toUpperCase(); // e.g. "720P"
+          const QUALITY = (process.env.QUALITY || '720p').toUpperCase();
 
           function downloadFile(url, dest) {
             return new Promise((resolve, reject) => {
               const file = fs.createWriteStream(dest);
-              const proto = url.startsWith('https') ? https : http;
               function doGet(targetUrl) {
+                const proto = targetUrl.startsWith('https') ? https : http;
                 proto.get(targetUrl, {
                   headers: {
                     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
                     'Referer': 'https://vidssave.com/'
                   }
                 }, (res) => {
-                  if (res.statusCode === 301 || res.statusCode === 302) {
+                  if ([301,302,303,307,308].includes(res.statusCode)) {
                     return doGet(res.headers.location);
                   }
                   res.pipe(file);
@@ -72,12 +72,13 @@ jobs:
 
             const browser = await chromium.launch({
               headless: true,
-              args: ['--no-sandbox', '--disable-setuid-sandbox']
+              args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled']
             });
 
             const context = await browser.newContext({
-              userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
-              viewport: { width: 1280, height: 900 }
+              userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              viewport: { width: 1280, height: 900 },
+              locale: 'en-US',
             });
 
             const page = await context.newPage();
@@ -85,147 +86,235 @@ jobs:
             // ── 1. Buka halaman ──────────────────────────────────────────
             console.log('\n[1/5] Opening vidssave.com...');
             await page.goto('https://vidssave.com/en/youtube-shorts-download', {
-              waitUntil: 'networkidle',
+              waitUntil: 'domcontentloaded',
               timeout: 60000
             });
-            await page.screenshot({ path: 'ss1-open.png' });
 
-            // ── 2. Isi input (id="url-input-wrapper") ────────────────────
-            console.log('[2/5] Filling input #url-input-wrapper...');
-            await page.waitForSelector('#url-input-wrapper', { timeout: 20000 });
-            await page.click('#url-input-wrapper');
-            await page.fill('#url-input-wrapper', YOUTUBE_URL);
-            await page.screenshot({ path: 'ss2-filled.png' });
-            console.log('      URL filled ✓');
+            // Tunggu network idle max 10 detik
+            try {
+              await page.waitForLoadState('networkidle', { timeout: 10000 });
+            } catch(_) {
+              console.log('      networkidle timeout, continuing anyway...');
+            }
 
-            // ── 3. Enter → tunggu hasil ──────────────────────────────────
-            console.log('[3/5] Pressing Enter and waiting for results...');
-            await page.press('#url-input-wrapper', 'Enter');
+            await page.screenshot({ path: 'ss1-open.png', fullPage: true });
 
-            // Tunggu list item hasil muncul (li yang berisi MP4 + kualitas)
-            await page.waitForSelector('li .text-left', { timeout: 60000 });
-            await page.waitForTimeout(2000); // beri waktu semua item render
-            await page.screenshot({ path: 'ss3-results.png' });
-            console.log('      Results loaded ✓');
+            // Dump HTML untuk debug
+            const html = await page.content();
+            fs.writeFileSync('page-source.html', html);
+            console.log(`      Page title: ${await page.title()}`);
+            console.log(`      HTML length: ${html.length} chars`);
 
-            // ── 4. Temukan baris kualitas yang diminta ───────────────────
-            console.log(`[4/5] Looking for ${QUALITY} row...`);
+            // ── 2. Cari input (berbagai cara) ────────────────────────────
+            console.log('\n[2/5] Looking for input field...');
 
-            // Setiap baris = <li> yang mengandung div teks kualitas (misal "720P")
-            // Struktur: li > div > div[MP4] + div[720P] + div[size] ... + div[Download btn]
-            const downloadUrl = await page.evaluate((targetQuality) => {
-              const items = document.querySelectorAll('li');
-              for (const li of items) {
-                // Cek apakah li ini mengandung teks kualitas yang diminta
-                const divs = li.querySelectorAll('div');
-                let qualityMatch = false;
-                for (const d of divs) {
-                  if (d.textContent.trim() === targetQuality) {
-                    qualityMatch = true;
-                    break;
-                  }
+            // Cetak semua input yang ada di halaman
+            const inputs = await page.evaluate(() => {
+              return [...document.querySelectorAll('input')].map(el => ({
+                id: el.id,
+                name: el.name,
+                type: el.type,
+                placeholder: el.placeholder,
+                className: el.className.substring(0, 80),
+                visible: el.offsetParent !== null
+              }));
+            });
+            console.log('      All inputs found:', JSON.stringify(inputs, null, 2));
+
+            // Coba selector berurutan
+            const selectors = [
+              '#url-input-wrapper',
+              'input[id="url-input-wrapper"]',
+              'input[placeholder="Enter URL or Search"]',
+              'input[placeholder*="Enter URL"]',
+              'input[placeholder*="URL"]',
+              'input[spellcheck="false"]',
+              'input[class*="min-h"]',
+              'input[type="text"]',
+              'input',
+            ];
+
+            let inputHandle = null;
+            let usedSelector = null;
+            for (const sel of selectors) {
+              try {
+                // Coba visible dulu, lalu tanpa visible
+                const el = await page.$(sel);
+                if (el) {
+                  inputHandle = el;
+                  usedSelector = sel;
+                  console.log(`      ✅ Found input with: ${sel}`);
+                  break;
                 }
-                if (!qualityMatch) continue;
-
-                // Temukan tombol download di dalam li ini
-                // Tombol = div yang punya cursor-pointer dan span teks "Download"
-                const btn = li.querySelector('div[class*="cursor-pointer"]');
-                if (btn) {
-                  // Cari data url — bisa di atribut data-url, onclick, atau href di dalam
-                  const anchor = li.querySelector('a[href]');
-                  if (anchor) return anchor.href;
-
-                  // Kalau tidak ada anchor, cari atribut lain
-                  const allEls = li.querySelectorAll('[data-url],[data-href],[data-link]');
-                  for (const el of allEls) {
-                    const u = el.dataset.url || el.dataset.href || el.dataset.link;
-                    if (u && u.includes('http')) return u;
-                  }
-                }
+              } catch(e) {
+                // lanjut
               }
-              return null;
+            }
+
+            if (!inputHandle) {
+              console.log('❌ No input found at all! Check page-source.html');
+              await browser.close();
+              process.exit(1);
+            }
+
+            // Scroll ke input, klik, isi
+            await inputHandle.scrollIntoViewIfNeeded();
+            await page.waitForTimeout(500);
+            await inputHandle.click({ force: true });
+            await page.waitForTimeout(300);
+            await inputHandle.fill(YOUTUBE_URL);
+            console.log(`      URL filled into [${usedSelector}] ✓`);
+            await page.screenshot({ path: 'ss2-filled.png', fullPage: true });
+
+            // ── 3. Submit ────────────────────────────────────────────────
+            console.log('\n[3/5] Submitting...');
+            await inputHandle.press('Enter');
+
+            // Tunggu hasil — coba beberapa indikator
+            const resultSelectors = [
+              'li .text-left',
+              'li:has-text("MP4")',
+              'li:has-text("Download")',
+              '[class*="border-b"]',
+            ];
+
+            let resultsLoaded = false;
+            for (const sel of resultSelectors) {
+              try {
+                await page.waitForSelector(sel, { timeout: 30000 });
+                resultsLoaded = true;
+                console.log(`      Results detected via: ${sel} ✓`);
+                break;
+              } catch(_) {}
+            }
+
+            if (!resultsLoaded) {
+              console.log('⚠️  Could not detect results, waiting 10s anyway...');
+              await page.waitForTimeout(10000);
+            }
+
+            await page.waitForTimeout(2000);
+            await page.screenshot({ path: 'ss3-results.png', fullPage: true });
+
+            // Dump HTML hasil
+            const html2 = await page.content();
+            fs.writeFileSync('page-results.html', html2);
+            console.log(`      Results HTML length: ${html2.length} chars`);
+
+            // ── 4. Temukan URL download ──────────────────────────────────
+            console.log(`\n[4/5] Looking for ${QUALITY} download URL...`);
+
+            // Cari semua <a> dan <li> yang relevan
+            const allData = await page.evaluate((targetQuality) => {
+              const result = { anchors: [], liRows: [] };
+
+              // Semua anchor dengan href
+              result.anchors = [...document.querySelectorAll('a[href]')]
+                .map(a => ({ text: a.textContent.trim().substring(0,60), href: a.href }))
+                .filter(a => a.href.startsWith('http'));
+
+              // Semua <li> yang mengandung "MP4"
+              [...document.querySelectorAll('li')].forEach(li => {
+                const text = li.textContent;
+                if (text.includes('MP4') || text.includes('Download')) {
+                  const anchors = [...li.querySelectorAll('a[href]')].map(a => a.href);
+                  const dataUrls = [...li.querySelectorAll('[data-url],[data-href],[data-src]')]
+                    .map(el => el.dataset.url || el.dataset.href || el.dataset.src);
+                  result.liRows.push({
+                    text: text.trim().substring(0, 120),
+                    anchors,
+                    dataUrls,
+                    hasQuality: text.includes(targetQuality)
+                  });
+                }
+              });
+
+              return result;
             }, QUALITY);
 
-            if (downloadUrl) {
-              console.log(`      Found direct URL: ${downloadUrl}`);
-            } else {
-              // Fallback: klik tombol Download pada baris yang sesuai lalu intercept request
-              console.log(`      Direct URL not found, clicking Download button for ${QUALITY}...`);
+            console.log(`      Found ${allData.anchors.length} anchors total`);
+            console.log(`      Found ${allData.liRows.length} MP4 li rows`);
+            fs.writeFileSync('debug-data.json', JSON.stringify(allData, null, 2));
+
+            // Cari URL dari anchor dalam li yang match kualitas
+            let downloadUrl = null;
+            for (const row of allData.liRows) {
+              if (row.hasQuality) {
+                console.log(`      Matched row: ${row.text}`);
+                if (row.anchors.length > 0) {
+                  downloadUrl = row.anchors[0];
+                  console.log(`      Direct anchor URL: ${downloadUrl}`);
+                  break;
+                }
+                if (row.dataUrls.filter(Boolean).length > 0) {
+                  downloadUrl = row.dataUrls.filter(Boolean)[0];
+                  console.log(`      Data URL: ${downloadUrl}`);
+                  break;
+                }
+              }
+            }
+
+            // Fallback: intercept klik
+            if (!downloadUrl) {
+              console.log(`      No direct URL, intercepting click on ${QUALITY} button...`);
 
               let capturedUrl = null;
-
-              // Intercept semua request video/mp4
-              await page.route('**', async (route) => {
-                const req = route.request();
-                const url = req.url();
-                if (
-                  url.includes('.mp4') ||
-                  url.includes('video') ||
-                  req.resourceType() === 'media'
-                ) {
+              const handler = async (route) => {
+                const url = route.request().url();
+                const rt = route.request().resourceType();
+                if (rt === 'media' || url.includes('.mp4') || url.includes('googlevideo') || url.includes('videoplayback')) {
                   capturedUrl = url;
-                  console.log(`      🎯 Intercepted: ${url}`);
+                  console.log(`      🎯 Intercepted: ${url.substring(0,100)}`);
                   await route.abort();
                 } else {
                   await route.continue();
                 }
-              });
+              };
+              await page.route('**', handler);
 
-              // Klik tombol Download pada baris kualitas yang tepat
-              await page.evaluate((targetQuality) => {
+              // Klik tombol Download di baris QUALITY
+              const clicked = await page.evaluate((targetQuality) => {
                 const items = document.querySelectorAll('li');
                 for (const li of items) {
-                  const divs = li.querySelectorAll('div');
-                  let qualityMatch = false;
-                  for (const d of divs) {
-                    if (d.textContent.trim() === targetQuality) {
-                      qualityMatch = true;
-                      break;
+                  if (!li.textContent.includes(targetQuality)) continue;
+                  // Cari div atau button dengan teks Download
+                  const els = [...li.querySelectorAll('div,button,a')];
+                  for (const el of els) {
+                    if (el.textContent.trim().includes('Download') && el !== li) {
+                      el.click();
+                      return `Clicked: ${el.tagName} "${el.textContent.trim().substring(0,30)}"`;
                     }
                   }
-                  if (!qualityMatch) continue;
-                  const btn = li.querySelector('div[class*="cursor-pointer"]');
-                  if (btn) { btn.click(); return; }
                 }
+                return null;
               }, QUALITY);
 
-              await page.waitForTimeout(5000);
-              await page.screenshot({ path: 'ss4-after-click.png' });
+              console.log(`      Click result: ${clicked}`);
+              await page.waitForTimeout(6000);
+              await page.unroute('**', handler);
+              await page.screenshot({ path: 'ss4-after-click.png', fullPage: true });
 
               if (capturedUrl) {
-                console.log(`      Captured URL: ${capturedUrl}`);
-              } else {
-                // Last resort: dump semua href & src di halaman
-                const allLinks = await page.evaluate(() => {
-                  return [...document.querySelectorAll('a[href],source[src],[data-url]')]
-                    .map(el => el.href || el.src || el.dataset.url)
-                    .filter(u => u && u.startsWith('http'));
-                });
-                fs.writeFileSync('debug-links.txt', allLinks.join('\n'));
-                console.log(`❌ Could not capture download URL. Saved ${allLinks.length} links to debug-links.txt`);
-                await browser.close();
-                process.exit(1);
+                downloadUrl = capturedUrl;
               }
-
-              // Gunakan capturedUrl untuk download
-              console.log(`\n[5/5] Downloading ${QUALITY} video...`);
-              const outFile = `video-${QUALITY}.mp4`;
-              await downloadFile(capturedUrl, outFile);
-              const size = (fs.statSync(outFile).size / 1024 / 1024).toFixed(2);
-              console.log(`✅ Saved: ${outFile} (${size} MB)`);
-              await browser.close();
-              return;
             }
 
-            // ── 5. Download file ─────────────────────────────────────────
-            console.log(`\n[5/5] Downloading ${QUALITY} video...`);
+            if (!downloadUrl) {
+              console.log('❌ Could not find download URL. Check debug-data.json and page-results.html');
+              await browser.close();
+              process.exit(1);
+            }
+
+            // ── 5. Download ──────────────────────────────────────────────
+            console.log(`\n[5/5] Downloading ${QUALITY}...`);
+            console.log(`      URL: ${downloadUrl.substring(0, 100)}`);
             const outFile = `video-${QUALITY}.mp4`;
             await downloadFile(downloadUrl, outFile);
             const size = (fs.statSync(outFile).size / 1024 / 1024).toFixed(2);
             console.log(`✅ Saved: ${outFile} (${size} MB)`);
 
             await browser.close();
-            console.log('\n🎉 All done!');
+            console.log('\n🎉 Done!');
           })();
           EOF
 
@@ -243,18 +332,23 @@ jobs:
           path: ss*.png
           retention-days: 7
 
+      - name: Upload debug files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-files
+          path: |
+            page-source.html
+            page-results.html
+            debug-data.json
+          retention-days: 3
+          if-no-files-found: ignore
+
       - name: Upload video
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: video-${{ github.event.inputs.quality }}
           path: video-*.mp4
           retention-days: 7
-
-      - name: Upload debug links (if any)
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: debug-links
-          path: debug-links.txt
           if-no-files-found: ignore
-          retention-days: 3
