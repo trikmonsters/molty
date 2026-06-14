@@ -25,6 +25,13 @@ on:
         required: false
         default: ''
         type: string
+      cookies_paste:
+        description: |
+          Paste isi cookies Netscape di sini (dari Cookie Editor → Export → Netscape).
+          Dimulai dengan baris: # Netscape HTTP Cookie File
+        required: false
+        default: ''
+        type: string
 
 jobs:
   download:
@@ -39,24 +46,56 @@ jobs:
           sudo apt-get install -y ffmpeg python3-pip -qq
           pip install -q --upgrade yt-dlp
           echo "✅ yt-dlp: $(yt-dlp --version)"
-          echo "✅ ffmpeg: $(ffmpeg -version | head -1)"
 
       - name: 📁 Buat folder output
         run: mkdir -p ~/downloads
 
-      # ─── COOKIES dari GitHub Secret (format Netscape) ─────
-      - name: 🍪 Setup cookies dari Secret
-        env:
-          YT_COOKIES: ${{ secrets.YT_COOKIES }}
+      # ── Prioritas 1: dari input langsung (paste) ──────────
+      - name: 🍪 Setup cookies dari input
+        if: ${{ inputs.cookies_paste != '' }}
         run: |
-          if [ -n "$YT_SECURE_COOKIES" ]; then
-            echo "$YT_SECURE_COOKIES" > ~/cookies.txt
-            echo "✅ Cookies dimuat ($(wc -l < ~/cookies.txt) baris)"
+          cat > ~/cookies.txt << 'COOKIESEOF'
+          ${{ inputs.cookies_paste }}
+          COOKIESEOF
+          # Hapus indentasi spasi di awal tiap baris
+          sed -i 's/^[[:space:]]*//' ~/cookies.txt
+          echo "✅ Cookies dari input: $(wc -l < ~/cookies.txt) baris"
+          head -2 ~/cookies.txt
+
+      # ── Prioritas 2: dari GitHub Secret ───────────────────
+      - name: 🍪 Setup cookies dari Secret (fallback)
+        if: ${{ inputs.cookies_paste == '' }}
+        env:
+          YT_COOKIES: ${{ secrets.YT_SECURE_COOKIES }}
+        run: |
+          if [ -n "$YT_COOKIES" ]; then
+            printf '%s\n' "$YT_COOKIES" > ~/cookies.txt
+            echo "✅ Cookies dari Secret: $(wc -l < ~/cookies.txt) baris"
+            head -2 ~/cookies.txt
           else
-            echo "⚠️  Secret YT_SECURE_COOKIES tidak ditemukan — download mungkin gagal"
+            echo "⚠️  Tidak ada cookies — download kemungkinan gagal"
           fi
 
-      # ─── DOWNLOAD ─────────────────────────────────────────
+      # ── Validasi cookies ──────────────────────────────────
+      - name: 🔍 Validasi cookies
+        run: |
+          if [ -f ~/cookies.txt ]; then
+            echo "📄 Preview cookies.txt:"
+            head -5 ~/cookies.txt
+            echo "---"
+            # Cek apakah ada cookie .youtube.com
+            if grep -q "youtube.com" ~/cookies.txt; then
+              echo "✅ Cookie YouTube ditemukan"
+            else
+              echo "⚠️  Tidak ada cookie youtube.com — pastikan export dari youtube.com"
+            fi
+            # Hapus baris kosong di awal jika ada
+            sed -i '/^$/d' ~/cookies.txt
+          else
+            echo "❌ cookies.txt tidak ada"
+          fi
+
+      # ── Download ──────────────────────────────────────────
       - name: 🎬 Download
         run: |
           URL="${{ inputs.url }}"
@@ -66,9 +105,8 @@ jobs:
           ARGS=(
             --no-warnings
             --progress
-            --retries 15
-            --fragment-retries 15
-            --retry-sleep linear=1::2
+            --retries 10
+            --fragment-retries 10
             --concurrent-fragments 4
             --no-part
             --merge-output-format mp4
@@ -78,18 +116,17 @@ jobs:
             --extractor-args "youtube:player_client=tv_embedded,web_creator,ios"
           )
 
-          # Pakai cookies jika ada
-          if [ -f ~/cookies.txt ]; then
+          if [ -f ~/cookies.txt ] && grep -q "youtube.com" ~/cookies.txt; then
             ARGS+=(--cookies ~/cookies.txt)
             echo "🍪 Menggunakan cookies"
+          else
+            echo "⚠️  Lanjut tanpa cookies"
           fi
 
-          # Subtitle
           if [ -n "$SUBTITLE" ]; then
             ARGS+=(--write-subs --write-auto-subs --sub-langs "$SUBTITLE" --embed-subs)
           fi
 
-          # Format
           case "$FORMAT" in
             video-best)    ARGS+=(-f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best") ;;
             video-1080p)   ARGS+=(-f "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]") ;;
@@ -103,45 +140,10 @@ jobs:
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "🎯 URL    : $URL"
           echo "📦 Format : $FORMAT"
-          echo "🌐 Sub    : ${SUBTITLE:-tidak}"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
           yt-dlp "${ARGS[@]}" "$URL"
 
-      # ─── FALLBACK ─────────────────────────────────────────
-      - name: 🔄 Fallback — coba client lain
-        if: failure()
-        run: |
-          URL="${{ inputs.url }}"
-          FORMAT="${{ inputs.format }}"
-
-          ARGS=(
-            --no-warnings
-            --retries 10
-            --no-part
-            --merge-output-format mp4
-            -o "$HOME/downloads/%(title)s [%(id)s].%(ext)s"
-            --restrict-filenames
-            --no-check-certificates
-            --extractor-args "youtube:player_client=mweb,ios,tv_embedded"
-          )
-
-          if [ -f ~/cookies.txt ]; then
-            ARGS+=(--cookies ~/cookies.txt)
-          fi
-
-          case "$FORMAT" in
-            video-best)    ARGS+=(-f "bestvideo+bestaudio/best") ;;
-            video-1080p)   ARGS+=(-f "best[height<=1080]") ;;
-            video-720p)    ARGS+=(-f "best[height<=720]") ;;
-            video-480p)    ARGS+=(-f "best[height<=480]") ;;
-            audio-*)       ARGS+=(-f "bestaudio/best" -x --audio-format mp3) ;;
-          esac
-
-          echo "⚠️ Mencoba fallback..."
-          yt-dlp "${ARGS[@]}" "$URL"
-
-      # ─── HASIL ────────────────────────────────────────────
       - name: 📊 Info hasil
         if: always()
         run: |
@@ -149,19 +151,16 @@ jobs:
             echo "✅ File berhasil diunduh:"
             ls -lh ~/downloads/
           else
-            echo "❌ Tidak ada file yang diunduh"
+            echo "❌ Tidak ada file"
           fi
 
-      - name: ☁️ Upload ke GitHub Release
+      - name: ☁️ Upload Release
         if: success()
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "dl-${{ github.run_number }}"
           name: "📥 Download #${{ github.run_number }}"
-          body: |
-            **URL:** ${{ inputs.url }}
-            **Format:** ${{ inputs.format }}
-            > File tersedia selama **90 hari**
+          body: "**URL:** ${{ inputs.url }} | **Format:** ${{ inputs.format }}"
           files: ~/downloads/*
           token: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
