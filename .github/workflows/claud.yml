@@ -55,37 +55,37 @@ jobs:
           printf '%s\n' "$YT_SECURE_COOKIES" > ~/cookies_raw.txt
 
           python3 - << 'PYEOF'
-import re, os
-
-src = os.path.expanduser("~/cookies_raw.txt")
-dst = os.path.expanduser("~/cookies.txt")
-out = []
-
-with open(src, encoding="utf-8", errors="replace") as f:
-    for line in f:
-        line = line.rstrip("\r\n")
-        if line.startswith("#") or not line.strip():
-            out.append(line)
-            continue
-        if line.startswith("#HttpOnly_"):
-            line = line[len("#HttpOnly_"):]
-        parts = line.split("\t")
-        if len(parts) >= 7:
-            out.append("\t".join(parts))
-            continue
-        parts = re.split(r'  +', line.strip())
-        parts = [p.strip() for p in parts if p.strip()]
-        if len(parts) >= 7:
-            out.append("\t".join(parts[:6] + [" ".join(parts[6:])]))
-        elif len(parts) > 0:
-            out.append("\t".join(parts))
-
-with open(dst, "w", encoding="utf-8") as f:
-    f.write("\n".join(out) + "\n")
-
-yt_lines = [l for l in out if "youtube.com" in l and not l.startswith("#")]
-print(f"✅ Total baris: {len(out)}, cookie YouTube: {len(yt_lines)}")
-PYEOF
+          import re, os
+          
+          src = os.path.expanduser("~/cookies_raw.txt")
+          dst = os.path.expanduser("~/cookies.txt")
+          out = []
+          
+          with open(src, encoding="utf-8", errors="replace") as f:
+              for line in f:
+                  line = line.rstrip("\r\n")
+                  if line.startswith("#") or not line.strip():
+                      out.append(line)
+                      continue
+                  if line.startswith("#HttpOnly_"):
+                      line = line[len("#HttpOnly_"):]
+                  parts = line.split("\t")
+                  if len(parts) >= 7:
+                      out.append("\t".join(parts))
+                      continue
+                  parts = re.split(r'  +', line.strip())
+                  parts = [p.strip() for p in parts if p.strip()]
+                  if len(parts) >= 7:
+                      out.append("\t".join(parts[:6] + [" ".join(parts[6:])]))
+                  elif len(parts) > 0:
+                      out.append("\t".join(parts))
+          
+          with open(dst, "w", encoding="utf-8") as f:
+              f.write("\n".join(out) + "\n")
+          
+          yt_lines = [l for l in out if "youtube.com" in l and not l.startswith("#")]
+          print(f"✅ Total baris: {len(out)}, cookie YouTube: {len(yt_lines)}")
+          PYEOF
 
       # ── Cek format tersedia ───────────────────────────────
       - name: 🔎 Cek format tersedia
