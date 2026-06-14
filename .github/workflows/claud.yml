@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       url:
-        description: 'YouTube URL (video atau playlist)'
+        description: 'YouTube URL (video / shorts / playlist)'
         required: true
         type: string
       format:
@@ -13,85 +13,75 @@ on:
         default: 'video-best'
         type: choice
         options:
-          - video-best        # Video kualitas terbaik (mp4)
-          - video-1080p       # Video 1080p (mp4)
-          - video-720p        # Video 720p (mp4)
-          - video-480p        # Video 480p (mp4)
-          - audio-mp3-320     # Audio MP3 320kbps
-          - audio-mp3-192     # Audio MP3 192kbps
-          - audio-m4a         # Audio M4A (terbaik)
-          - subtitle-only     # Subtitle saja
+          - video-best
+          - video-1080p
+          - video-720p
+          - video-480p
+          - audio-mp3-320
+          - audio-mp3-192
+          - audio-m4a
       subtitle:
-        description: 'Unduh subtitle? (id=Indonesia, en=Inggris, kosong=tidak)'
-        required: false
-        default: ''
-        type: string
-      playlist_items:
-        description: 'Item playlist (misal: 1-5, 1,3,5 — kosong = semua)'
-        required: false
-        default: ''
-        type: string
-      cookies:
-        description: 'Cookie browser (untuk video private/age-restricted) — tempel isi file cookies.txt'
+        description: 'Subtitle (id / en / kosong = tidak)'
         required: false
         default: ''
         type: string
 
 jobs:
   download:
-    name: 📥 Download YouTube
+    name: 📥 Download
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 180
 
     steps:
-      - name: 🔧 Setup Environment
+      - name: 🔧 Install dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y ffmpeg aria2 python3-pip -qq
+          sudo apt-get install -y ffmpeg python3-pip -qq
           pip install -q --upgrade yt-dlp
-          echo "✅ yt-dlp versi: $(yt-dlp --version)"
-          echo "✅ ffmpeg versi: $(ffmpeg -version | head -1)"
+          echo "✅ yt-dlp: $(yt-dlp --version)"
+          echo "✅ ffmpeg: $(ffmpeg -version | head -1)"
 
-      - name: 📁 Buat Folder Output
+      - name: 📁 Buat folder output
         run: mkdir -p ~/downloads
 
-      - name: 🍪 Setup Cookies (jika ada)
-        if: ${{ inputs.cookies != '' }}
+      # ─── COOKIES dari GitHub Secret (format Netscape) ─────
+      - name: 🍪 Setup cookies dari Secret
+        env:
+          YT_COOKIES: ${{ secrets.YT_COOKIES }}
         run: |
-          echo "${{ inputs.cookies }}" > ~/cookies.txt
-          echo "✅ Cookies berhasil disimpan"
+          if [ -n "$YT_SECURE_COOKIES" ]; then
+            echo "$YT_SECURE_COOKIES" > ~/cookies.txt
+            echo "✅ Cookies dimuat ($(wc -l < ~/cookies.txt) baris)"
+          else
+            echo "⚠️  Secret YT_SECURE_COOKIES tidak ditemukan — download mungkin gagal"
+          fi
 
-      - name: 🎬 Download Video / Audio
+      # ─── DOWNLOAD ─────────────────────────────────────────
+      - name: 🎬 Download
         run: |
           URL="${{ inputs.url }}"
           FORMAT="${{ inputs.format }}"
           SUBTITLE="${{ inputs.subtitle }}"
-          PLAYLIST="${{ inputs.playlist_items }}"
 
-          # Base arguments
           ARGS=(
             --no-warnings
             --progress
-            --console-title
-            --retries 10
-            --fragment-retries 10
-            --retry-sleep 5
+            --retries 15
+            --fragment-retries 15
+            --retry-sleep linear=1::2
             --concurrent-fragments 4
-            --buffer-size 16K
             --no-part
             --merge-output-format mp4
-            -o "%(title)s [%(id)s].%(ext)s"
+            -o "$HOME/downloads/%(title)s [%(id)s].%(ext)s"
             --restrict-filenames
+            --no-check-certificates
+            --extractor-args "youtube:player_client=tv_embedded,web_creator,ios"
           )
 
-          # Cookies
+          # Pakai cookies jika ada
           if [ -f ~/cookies.txt ]; then
             ARGS+=(--cookies ~/cookies.txt)
-          fi
-
-          # Playlist items
-          if [ -n "$PLAYLIST" ]; then
-            ARGS+=(--playlist-items "$PLAYLIST")
+            echo "🍪 Menggunakan cookies"
           fi
 
           # Subtitle
@@ -99,82 +89,87 @@ jobs:
             ARGS+=(--write-subs --write-auto-subs --sub-langs "$SUBTITLE" --embed-subs)
           fi
 
-          # Format selection
+          # Format
           case "$FORMAT" in
-            video-best)
-              ARGS+=(-f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best")
-              ;;
-            video-1080p)
-              ARGS+=(-f "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]")
-              ;;
-            video-720p)
-              ARGS+=(-f "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[height<=720]")
-              ;;
-            video-480p)
-              ARGS+=(-f "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=480]+bestaudio/best[height<=480]")
-              ;;
-            audio-mp3-320)
-              ARGS+=(-f "bestaudio/best" -x --audio-format mp3 --audio-quality 0)
-              ;;
-            audio-mp3-192)
-              ARGS+=(-f "bestaudio/best" -x --audio-format mp3 --audio-quality 5)
-              ;;
-            audio-m4a)
-              ARGS+=(-f "bestaudio[ext=m4a]/bestaudio/best" -x --audio-format m4a)
-              ;;
-            subtitle-only)
-              ARGS+=(--write-subs --write-auto-subs --skip-download --sub-langs all)
-              ;;
+            video-best)    ARGS+=(-f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best") ;;
+            video-1080p)   ARGS+=(-f "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]") ;;
+            video-720p)    ARGS+=(-f "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]") ;;
+            video-480p)    ARGS+=(-f "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480]") ;;
+            audio-mp3-320) ARGS+=(-f "bestaudio/best" -x --audio-format mp3 --audio-quality 0) ;;
+            audio-mp3-192) ARGS+=(-f "bestaudio/best" -x --audio-format mp3 --audio-quality 5) ;;
+            audio-m4a)     ARGS+=(-f "bestaudio[ext=m4a]/bestaudio/best" -x --audio-format m4a) ;;
           esac
 
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "🎯 URL     : $URL"
-          echo "📦 Format  : $FORMAT"
-          echo "🌐 Subtitle: ${SUBTITLE:-tidak}"
-          echo "📋 Playlist: ${PLAYLIST:-semua}"
+          echo "🎯 URL    : $URL"
+          echo "📦 Format : $FORMAT"
+          echo "🌐 Sub    : ${SUBTITLE:-tidak}"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-          cd ~/downloads
           yt-dlp "${ARGS[@]}" "$URL"
 
-          echo ""
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "📂 File hasil unduhan:"
-          ls -lh ~/downloads/
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-      - name: 📊 Info Ukuran Total
+      # ─── FALLBACK ─────────────────────────────────────────
+      - name: 🔄 Fallback — coba client lain
+        if: failure()
         run: |
-          echo "💾 Total ukuran:"
-          du -sh ~/downloads/
-          echo ""
-          echo "📄 Daftar file:"
-          find ~/downloads -type f | while read f; do
-            size=$(stat -c%s "$f")
-            name=$(basename "$f")
-            echo "  • $name ($(numfmt --to=iec-i --suffix=B $size))"
-          done
+          URL="${{ inputs.url }}"
+          FORMAT="${{ inputs.format }}"
 
-      - name: ☁️ Upload ke Release GitHub
+          ARGS=(
+            --no-warnings
+            --retries 10
+            --no-part
+            --merge-output-format mp4
+            -o "$HOME/downloads/%(title)s [%(id)s].%(ext)s"
+            --restrict-filenames
+            --no-check-certificates
+            --extractor-args "youtube:player_client=mweb,ios,tv_embedded"
+          )
+
+          if [ -f ~/cookies.txt ]; then
+            ARGS+=(--cookies ~/cookies.txt)
+          fi
+
+          case "$FORMAT" in
+            video-best)    ARGS+=(-f "bestvideo+bestaudio/best") ;;
+            video-1080p)   ARGS+=(-f "best[height<=1080]") ;;
+            video-720p)    ARGS+=(-f "best[height<=720]") ;;
+            video-480p)    ARGS+=(-f "best[height<=480]") ;;
+            audio-*)       ARGS+=(-f "bestaudio/best" -x --audio-format mp3) ;;
+          esac
+
+          echo "⚠️ Mencoba fallback..."
+          yt-dlp "${ARGS[@]}" "$URL"
+
+      # ─── HASIL ────────────────────────────────────────────
+      - name: 📊 Info hasil
+        if: always()
+        run: |
+          if ls ~/downloads/* 2>/dev/null; then
+            echo "✅ File berhasil diunduh:"
+            ls -lh ~/downloads/
+          else
+            echo "❌ Tidak ada file yang diunduh"
+          fi
+
+      - name: ☁️ Upload ke GitHub Release
+        if: success()
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: "download-${{ github.run_number }}"
+          tag_name: "dl-${{ github.run_number }}"
           name: "📥 Download #${{ github.run_number }}"
           body: |
             **URL:** ${{ inputs.url }}
             **Format:** ${{ inputs.format }}
-            **Subtitle:** ${{ inputs.subtitle || 'tidak' }}
-            **Diunduh pada:** ${{ github.event.head_commit.timestamp || 'sekarang' }}
-            
-            > ⚠️ File akan otomatis terhapus setelah **90 hari** (batas GitHub Release)
+            > File tersedia selama **90 hari**
           files: ~/downloads/*
           token: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
 
-      - name: 📤 Upload sebagai Artifact (cadangan)
+      - name: 📤 Upload Artifact
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: "youtube-download-${{ github.run_number }}"
+          name: "yt-dl-${{ github.run_number }}"
           path: ~/downloads/
           retention-days: 90
-          if-no-files-found: warn
