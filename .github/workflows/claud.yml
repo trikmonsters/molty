@@ -51,56 +51,49 @@ jobs:
             echo "❌ Secret YT_SECURE_COOKIES tidak ditemukan!"
             exit 1
           fi
-
           printf '%s\n' "$YT_SECURE_COOKIES" > ~/cookies_raw.txt
-
           python3 - << 'PYEOF'
-          import re, os
-          
-          src = os.path.expanduser("~/cookies_raw.txt")
-          dst = os.path.expanduser("~/cookies.txt")
-          out = []
-          
-          with open(src, encoding="utf-8", errors="replace") as f:
-              for line in f:
-                  line = line.rstrip("\r\n")
-                  if line.startswith("#") or not line.strip():
-                      out.append(line)
-                      continue
-                  if line.startswith("#HttpOnly_"):
-                      line = line[len("#HttpOnly_"):]
-                  parts = line.split("\t")
-                  if len(parts) >= 7:
-                      out.append("\t".join(parts))
-                      continue
-                  parts = re.split(r'  +', line.strip())
-                  parts = [p.strip() for p in parts if p.strip()]
-                  if len(parts) >= 7:
-                      out.append("\t".join(parts[:6] + [" ".join(parts[6:])]))
-                  elif len(parts) > 0:
-                      out.append("\t".join(parts))
-          
-          with open(dst, "w", encoding="utf-8") as f:
-              f.write("\n".join(out) + "\n")
-          
-          yt_lines = [l for l in out if "youtube.com" in l and not l.startswith("#")]
-          print(f"✅ Total baris: {len(out)}, cookie YouTube: {len(yt_lines)}")
-          PYEOF
+import re, os
+src = os.path.expanduser("~/cookies_raw.txt")
+dst = os.path.expanduser("~/cookies.txt")
+out = []
+with open(src, encoding="utf-8", errors="replace") as f:
+    for line in f:
+        line = line.rstrip("\r\n")
+        if line.startswith("#") or not line.strip():
+            out.append(line)
+            continue
+        if line.startswith("#HttpOnly_"):
+            line = line[len("#HttpOnly_"):]
+        parts = line.split("\t")
+        if len(parts) >= 7:
+            out.append("\t".join(parts))
+            continue
+        parts = re.split(r'  +', line.strip())
+        parts = [p.strip() for p in parts if p.strip()]
+        if len(parts) >= 7:
+            out.append("\t".join(parts[:6] + [" ".join(parts[6:])]))
+        elif len(parts) > 0:
+            out.append("\t".join(parts))
+with open(dst, "w", encoding="utf-8") as f:
+    f.write("\n".join(out) + "\n")
+yt_lines = [l for l in out if "youtube.com" in l and not l.startswith("#")]
+print(f"✅ Total baris: {len(out)}, cookie YouTube: {len(yt_lines)}")
+PYEOF
 
-      # ── Cek format tersedia ───────────────────────────────
-      - name: 🔎 Cek format tersedia
+      # ── Cek format dari semua client sekaligus ────────────
+      - name: 🔎 Cek format tersedia (ios + android)
         run: |
           URL="${{ inputs.url }}"
-          echo "📋 Format tersedia untuk: $URL"
+          echo "=== CLIENT: ios ==="
           yt-dlp \
             --no-warnings \
             --no-check-certificates \
             --cookies ~/cookies.txt \
-            --extractor-args "youtube:player_client=web_creator,tv_embedded,ios" \
-            --list-formats \
-            "$URL" 2>&1 || true
+            --extractor-args "youtube:player_client=ios" \
+            --list-formats "$URL" 2>&1 | grep -v "^$" || true
 
-      # ── Download ──────────────────────────────────────────
+      # ── Download dengan ios client (support Shorts) ───────
       - name: 🎬 Download
         run: |
           URL="${{ inputs.url }}"
@@ -119,17 +112,19 @@ jobs:
             --restrict-filenames
             --no-check-certificates
             --cookies ~/cookies.txt
-            --extractor-args "youtube:player_client=web_creator,tv_embedded,ios"
+            # ios → stream video penuh untuk Shorts
+            # android → fallback
+            # tv_embedded → fallback untuk video biasa
+            --extractor-args "youtube:player_client=ios,android,tv_embedded"
           )
 
           if [ -n "$SUBTITLE" ]; then
             BASE_ARGS+=(--write-subs --write-auto-subs --sub-langs "$SUBTITLE" --embed-subs)
           fi
 
-          # Format selector — selalu ada fallback ke "best" agar tidak gagal
           case "$FORMAT" in
             video-best)
-              FORMAT_SEL="bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio/bestvideo+bestaudio/best"
+              FORMAT_SEL="bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
               ;;
             video-1080p)
               FORMAT_SEL="bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
@@ -156,7 +151,7 @@ jobs:
 
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "🎯 URL    : $URL"
-          echo "📦 Format : $FORMAT → $FORMAT_SEL"
+          echo "📦 Format : $FORMAT_SEL"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
           yt-dlp "${BASE_ARGS[@]}" -f "$FORMAT_SEL" "$URL"
